@@ -31,8 +31,7 @@ typedef enum
   TOKEN_LPAREN,
   TOKEN_RPAREN,
   TOKEN_COMMA,
-  TOKEN_LESS,
-  TOKEN_GREATER,
+  TOKEN_EQUAL,
   TOKEN_PRIVATE,
   TOKEN_ENUM,
   TOKEN_SYSTEM,
@@ -68,8 +67,7 @@ typedef enum
 typedef struct
 {
   TokenType type;
-  char *start;
-  char *end;
+  const char *literal;
   int line;
   int column;
 } Token;

@@ -50,17 +50,55 @@ tokensPush(Tokens *tokens, Token token)
   tokens->tokens[tokens->length++] = token;
 }
 
+Token
+newToken(TokenType type, char *literal, int line, int column)
+{
+  Token token;
+  token.type    = type;
+  token.column  = column;
+  token.line    = line;
+  token.literal = literal;
+  return token;
+}
+
 Tokens
 tokenize(char *source)
 {
   Tokens tokens;
   char *line = strtok(source, "\n");
+  int column;
+  int linenum = 1;
 
   tokensInit(&tokens);
 
-  for (; line != NULL; line = strtok(NULL, "\n"))
+  for (; line != NULL; line = strtok(NULL, "\n"), linenum++)
     {
-      printf("line: %s\n", line);
+      for (column = 0; line[column] != '\0'; column++)
+        {
+          switch (line[column])
+            {
+            case '@':
+              tokensPush(&tokens, newToken(TOKEN_AT, "@", linenum, column));
+              break;
+            case '(':
+              tokensPush(&tokens,
+                         newToken(TOKEN_LPAREN, "(", linenum, column));
+              break;
+            case ')':
+              tokensPush(&tokens,
+                         newToken(TOKEN_RPAREN, ")", linenum, column));
+              break;
+            case ',':
+              tokensPush(&tokens, newToken(TOKEN_COMMA, ",", linenum, column));
+              break;
+            case '.':
+              tokensPush(&tokens, newToken(TOKEN_DOT, ".", linenum, column));
+              break;
+            case ':':
+              tokensPush(&tokens, newToken(TOKEN_COLON, ":", linenum, column));
+              break;
+            }
+        }
     }
 
   return tokens;
