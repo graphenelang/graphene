@@ -23,7 +23,7 @@ project(
     LANGUAGES C
 )
 
-add_executable(graphene src/main.c)
+add_executable(graphene src/main.c src/lexer.c)
 
 set_property(TARGET graphene PROPERTY C_STANDARD 90)
 
