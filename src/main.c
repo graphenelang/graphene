@@ -75,7 +75,21 @@ readFile(char *path)
 void
 compile(char *source)
 {
-  Tokens tokens = tokenize(source);
+  Tokens tokens;
+  int i;
+
+  if (tokenize(source, &tokens))
+    {
+      exit(1);
+    }
+
+  for (i = 0; i < tokens.length; i++)
+    {
+      Token token = tokens.tokens[i];
+      printf("%d:%d \"%.*s\"\n", token.line, token.column, token.length,
+             token.start);
+    }
+
   tokensFree(&tokens);
   free(source);
 }

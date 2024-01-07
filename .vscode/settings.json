@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "__locale": "c",
+        "__string": "c",
+        "stdlib.h": "c"
+    }
+}

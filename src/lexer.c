@@ -18,6 +18,7 @@
  */
 
 #include "lexer.h"
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,55 +52,91 @@ tokensPush(Tokens *tokens, Token token)
 }
 
 Token
-newToken(TokenType type, char *literal, int line, int column)
+newToken(TokenType type, char *start, int length, int line, int column)
 {
   Token token;
-  token.type    = type;
-  token.column  = column;
-  token.line    = line;
-  token.literal = literal;
+  token.type   = type;
+  token.column = column;
+  token.line   = line;
+  token.start  = start;
+  token.length = length;
   return token;
 }
 
-Tokens
-tokenize(char *source)
+void
+printError(char *line_start, int line, int column, char *message)
 {
-  Tokens tokens;
-  char *line = strtok(source, "\n");
-  int column;
-  int linenum = 1;
+  int i;
 
-  tokensInit(&tokens);
+  fprintf(stderr, "%d | ", line);
+  for (; *line_start != '\n' && *line_start != '\0'; line_start++)
+    fprintf(stderr, "%c", *line_start);
 
-  for (; line != NULL; line = strtok(NULL, "\n"), linenum++)
+  fprintf(stderr, "\n");
+
+  for (i = -3; i < column; i++)
+    fprintf(stderr, " ");
+
+  fprintf(stderr, "^ %s\n", message);
+}
+
+int
+tokenize(char *source, Tokens *tokens)
+{
+  char *pos;
+  char *line_start = source;
+  int column       = 1;
+  int line         = 1;
+  int error        = 0;
+
+  tokensInit(tokens);
+
+  for (pos = source; *pos != '\0'; pos++, column++)
     {
-      for (column = 0; line[column] != '\0'; column++)
+      switch (*pos)
         {
-          switch (line[column])
-            {
-            case '@':
-              tokensPush(&tokens, newToken(TOKEN_AT, "@", linenum, column));
-              break;
-            case '(':
-              tokensPush(&tokens,
-                         newToken(TOKEN_LPAREN, "(", linenum, column));
-              break;
-            case ')':
-              tokensPush(&tokens,
-                         newToken(TOKEN_RPAREN, ")", linenum, column));
-              break;
-            case ',':
-              tokensPush(&tokens, newToken(TOKEN_COMMA, ",", linenum, column));
-              break;
-            case '.':
-              tokensPush(&tokens, newToken(TOKEN_DOT, ".", linenum, column));
-              break;
-            case ':':
-              tokensPush(&tokens, newToken(TOKEN_COLON, ":", linenum, column));
-              break;
-            }
+        case ' ':
+        case '\t':
+        case '\r':
+          break;
+        case '\n':
+          line_start = pos + 1;
+          column     = 0;
+          line++;
+          break;
+        case '@':
+          tokensPush(tokens, newToken(TOKEN_AT, pos, 1, line, column));
+          break;
+        case '{':
+          tokensPush(tokens, newToken(TOKEN_LBRACE, pos, 1, line, column));
+          break;
+        case '}':
+          tokensPush(tokens, newToken(TOKEN_RBRACE, pos, 1, line, column));
+          break;
+        case '(':
+          tokensPush(tokens, newToken(TOKEN_LPAREN, pos, 1, line, column));
+          break;
+        case ')':
+          tokensPush(tokens, newToken(TOKEN_RPAREN, pos, 1, line, column));
+          break;
+        case ',':
+          tokensPush(tokens, newToken(TOKEN_COMMA, pos, 1, line, column));
+          break;
+        // TODO: equals
+        case '.':
+          tokensPush(tokens, newToken(TOKEN_DOT, pos, 1, line, column));
+          break;
+        case ':':
+          tokensPush(tokens, newToken(TOKEN_COLON, pos, 1, line, column));
+          break;
+        default:
+          {
+            printError(line_start, line, column, "Unexpected character");
+            error++;
+            break;
+          }
         }
     }
 
-  return tokens;
+  return error;
 }

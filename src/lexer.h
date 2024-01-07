@@ -20,7 +20,6 @@
 
 typedef enum
 {
-  TOKEN_EOF,
   TOKEN_AT,
   TOKEN_CONST,
   TOKEN_ENTITY,
@@ -67,7 +66,8 @@ typedef enum
 typedef struct
 {
   TokenType type;
-  const char *literal;
+  const char *start;
+  int length;
   int line;
   int column;
 } Token;
@@ -83,6 +83,6 @@ void tokensInit(Tokens *tokens);
 void tokensFree(Tokens *tokens);
 void tokensPush(Tokens *tokens, Token token);
 
-Tokens tokenize(char *source);
+int tokenize(char *source, Tokens *tokens);
 
 #endif
