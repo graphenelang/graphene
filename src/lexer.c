@@ -81,6 +81,175 @@ printError(char *line_start, int line, int column, char *message)
 }
 
 int
+number(char **pos, int *column, int line, Tokens *tokens)
+{
+  int length     = 0;
+  int tok_column = *column;
+  char *start    = *pos;
+
+  if (**pos == '0')
+    {
+      (*pos)++;
+      (*column)++;
+      length++;
+
+      switch (**pos)
+        {
+        case 'x':
+          (*pos)++;
+          (*column)++;
+          length++;
+
+          while (isxdigit(**pos))
+            {
+              (*pos)++;
+              (*column)++;
+              length++;
+            }
+
+          if (length == 2)
+            {
+              printError(start, line, tok_column + 2,
+                         "Expected digits after '0x'");
+              return 1;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+          break;
+        case 'b':
+          (*pos)++;
+          (*column)++;
+          length++;
+
+          while (**pos == '0' || **pos == '1')
+            {
+              (*pos)++;
+              (*column)++;
+              length++;
+            }
+
+          if (length == 2)
+            {
+              printError(start, line, tok_column + 2,
+                         "Expected digits after '0b'");
+              return 1;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+          break;
+        case 'o':
+          (*pos)++;
+          (*column)++;
+          length++;
+
+          while (**pos >= '0' && **pos <= '7')
+            {
+              (*pos)++;
+              (*column)++;
+              length++;
+            }
+
+          if (length == 2)
+            {
+              printError(start, line, tok_column + 2,
+                         "Expected digits after '0o'");
+              return 1;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+          break;
+
+        default:
+          while (isdigit(**pos))
+            {
+              (*pos)++;
+              (*column)++;
+              length++;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+        }
+    }
+  else
+    {
+      while (isdigit(**pos))
+        {
+          (*pos)++;
+          (*column)++;
+          length++;
+        }
+
+      if (**pos == '.')
+        {
+          int before_point = length;
+
+          (*pos)++;
+          (*column)++;
+          length++;
+
+          while (isdigit(**pos))
+            {
+              (*pos)++;
+              (*column)++;
+              length++;
+            }
+
+          if ((length - before_point) == 1)
+            {
+              printError(start, line, *column, "Expected digits after '.'");
+              return 1;
+            }
+
+          if (**pos == 'e' || **pos == 'E')
+            {
+              (*pos)++;
+              (*column)++;
+              length++;
+
+              if (**pos == '+' || **pos == '-')
+                {
+                  (*pos)++;
+                  (*column)++;
+                  length++;
+                }
+
+              while (isdigit(**pos))
+                {
+                  (*pos)++;
+                  (*column)++;
+                  length++;
+                }
+
+              if (before_point != 1)
+                {
+                  printError(start, line, tok_column + 1,
+                             "Can only have one digit before the point in "
+                             "scientific notation");
+                  return 1;
+                }
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_FLOAT, start, length, 0, tok_column));
+        }
+      else
+        {
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, 0, tok_column));
+        }
+    }
+
+  (*pos)--;
+  (*column)--;
+
+  return 0;
+}
+
+int
 tokenize(char *source, Tokens *tokens)
 {
   char *pos;
@@ -131,9 +300,19 @@ tokenize(char *source, Tokens *tokens)
           break;
         default:
           {
-            printError(line_start, line, column, "Unexpected character");
-            error++;
-            break;
+            if (isdigit(*pos))
+              {
+                if (number(&pos, &column, line, tokens))
+                  {
+                    error++;
+                  }
+              }
+            else
+              {
+                printError(line_start, line, column, "Unexpected character");
+                error++;
+                break;
+              }
           }
         }
     }
