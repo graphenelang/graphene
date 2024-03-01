@@ -18,6 +18,9 @@
 #ifndef LEXER_H
 #define LEXER_H
 
+#include <stddef.h>
+#include <utf8proc.h>
+
 typedef enum
 {
   TOKEN_AT,
@@ -66,7 +69,7 @@ typedef enum
 typedef struct
 {
   TokenType type;
-  const char *start;
+  const uint8_t *start;
   int length;
   int line;
   int column;
@@ -83,6 +86,6 @@ void tokensInit(Tokens *tokens);
 void tokensFree(Tokens *tokens);
 void tokensPush(Tokens *tokens, Token token);
 
-int tokenize(char *source, Tokens *tokens);
+int tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len);
 
 #endif

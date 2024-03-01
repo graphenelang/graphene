@@ -25,7 +25,9 @@ project(
 
 add_executable(graphene src/main.c src/lexer.c)
 
-set_property(TARGET graphene PROPERTY C_STANDARD 90)
+set_property(TARGET graphene PROPERTY C_STANDARD 99)
+add_subdirectory(vendor/utf8proc)
+target_link_libraries(graphene utf8proc)
 
 if(MSVC)
   target_compile_options(graphene PRIVATE /W4)

@@ -20,22 +20,32 @@
 #include "lexer.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <utf8proc.h>
 
-char *
-readLine(void)
+#define UTF8PROC_OPTIONS                                                      \
+  (UTF8PROC_NULLTERM | UTF8PROC_DECOMPOSE | UTF8PROC_IGNORE)
+
+utf8proc_ssize_t
+readLine(uint8_t **dest)
 {
   char *source   = NULL;
   size_t bufsize = 0;
   if (getline(&source, &bufsize, stdin) == EOF)
     {
       free(source);
-      return NULL;
+      *dest = NULL;
+      return 0;
     }
-  return source;
+
+  utf8proc_ssize_t size
+      = utf8proc_map((uint8_t *)source, bufsize, dest, UTF8PROC_OPTIONS);
+  free(source);
+
+  return size;
 }
 
-char *
-readFile(char *path)
+utf8proc_ssize_t
+readFile(char *path, uint8_t **dest)
 {
   FILE *file = fopen(path, "r");
   size_t size;
@@ -69,16 +79,19 @@ readFile(char *path)
   buffer[size] = '\0';
 
   fclose(file);
-  return buffer;
+  utf8proc_ssize_t utf8_size = utf8proc_map(
+      (uint8_t *)buffer, size, (uint8_t **)dest, UTF8PROC_OPTIONS);
+  free(buffer);
+  return utf8_size;
 }
 
 void
-compile(char *source)
+compile(uint8_t *source, utf8proc_ssize_t source_len)
 {
   Tokens tokens;
   int i;
 
-  if (tokenize(source, &tokens))
+  if (tokenize(source, &tokens, source_len))
     {
       exit(1);
     }
@@ -97,12 +110,13 @@ compile(char *source)
 int
 main(int argc, char **argv)
 {
-  char *source;
+  uint8_t *source;
+  utf8proc_ssize_t source_length;
 
   if (argc == 2)
     {
-      source = readFile(argv[1]);
-      compile(source);
+      source_length = readFile(argv[1], &source);
+      compile(source, source_length);
     }
   else
     {
@@ -110,12 +124,12 @@ main(int argc, char **argv)
         {
           printf("> ");
 
-          source = readLine();
+          source_length = readLine(&source);
           if (source == NULL)
             {
               break;
             }
-          compile(source);
+          compile(source, source_length);
         }
     }
 

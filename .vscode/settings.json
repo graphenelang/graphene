@@ -2,6 +2,8 @@
     "files.associations": {
         "__locale": "c",
         "__string": "c",
-        "stdlib.h": "c"
+        "stdlib.h": "c",
+        "lexer.h": "c",
+        "utf8proc.h": "c"
     }
 }
