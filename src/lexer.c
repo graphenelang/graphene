@@ -81,8 +81,190 @@ printError(char *line_start, int line, int column, char *message)
 }
 
 int
-number(char **pos, int *column, int line, Tokens *tokens)
+number(char *line_start, uint8_t **pos, int *column, int line, Tokens *tokens)
 {
+  int length     = 0;
+  int tok_column = *column;
+  uint8_t *start = *pos;
+
+  utf8proc_ssize_t bytes_read;
+  int32_t codepoint;
+  if (bytes_read = utf8proc_iterate(*pos, -1, &codepoint), codepoint == '0')
+    {
+      (*pos) += bytes_read;
+      (*column)++;
+      length++;
+
+      switch (bytes_read = utf8proc_iterate(*pos, -1, &codepoint), codepoint)
+        {
+        case 'x':
+          (*pos) += bytes_read;
+          (*column)++;
+          length++;
+
+          while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                 isxdigit(codepoint))
+            {
+              (*pos) += bytes_read;
+              (*column)++;
+              length++;
+            }
+
+          if (length == 2)
+            {
+              printError(line_start, line, *column,
+                         "Expected hexadecimal digit");
+              return 1;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+          break;
+        case 'b':
+          (*pos) += bytes_read;
+          (*column)++;
+          length++;
+
+          while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                 codepoint == '0' || codepoint == '1')
+            {
+              (*pos) += bytes_read;
+              (*column)++;
+              length++;
+            }
+
+          if (length == 2)
+            {
+              printError(line_start, line, *column, "Expected binary digit");
+              return 1;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+          break;
+
+        case 'o':
+          (*pos) += bytes_read;
+          (*column)++;
+          length++;
+
+          while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                 codepoint >= '0' && codepoint <= '7')
+            {
+              (*pos) += bytes_read;
+              (*column)++;
+              length++;
+            }
+
+          if (length == 2)
+            {
+              printError(line_start, line, *column, "Expected octal digit");
+              return 1;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+          break;
+        default:
+          while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                 isdigit(codepoint))
+            {
+              (*pos) += bytes_read;
+              (*column)++;
+              length++;
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+        }
+    }
+  else
+    {
+      while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+             isdigit(codepoint))
+        {
+          (*pos) += bytes_read;
+          (*column)++;
+          length++;
+        }
+
+      if (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+          codepoint == '.')
+        {
+          int before_point = length;
+
+          (*pos) += bytes_read;
+          (*column)++;
+          length++;
+
+          while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                 isdigit(codepoint))
+            {
+              (*pos) += bytes_read;
+              (*column)++;
+              length++;
+            }
+
+          if (length == before_point + 1)
+            {
+              printError(line_start, line, *column,
+                         "Expected digit after decimal point");
+              return 1;
+            }
+
+          if (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+              codepoint == 'e' || codepoint == 'E')
+            {
+              int e_length = length;
+
+              (*pos) += bytes_read;
+              (*column)++;
+              length++;
+
+              if (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                  codepoint == '+' || codepoint == '-')
+                {
+                  (*pos) += bytes_read;
+                  (*column)++;
+                  length++;
+                }
+
+              while (bytes_read = utf8proc_iterate(*pos, -1, &codepoint),
+                     isdigit(codepoint))
+                {
+                  (*pos) += bytes_read;
+                  (*column)++;
+                  length++;
+                }
+
+              if (before_point != 1)
+                {
+                  printError(line_start, line, tok_column + before_point - 1,
+                             "Can only have one digit before the point in "
+                             "scientific notation");
+                  return 1;
+                }
+
+              if (length == e_length + 1)
+                {
+                  printError(line_start, line, *column,
+                             "Expected digit after exponent");
+                  return 1;
+                }
+            }
+
+          tokensPush(tokens,
+                     newToken(TOKEN_FLOAT, start, length, line, tok_column));
+        }
+      else
+        {
+          tokensPush(tokens,
+                     newToken(TOKEN_INTEGER, start, length, line, tok_column));
+        }
+    }
+
+  (*pos) -= bytes_read;
+  (*column)--;
 
   return 0;
 }
@@ -143,10 +325,10 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
           {
             if (isdigit(codepoint))
               {
-                // if (number(&pos, &column, line, tokens))
-                //   {
-                //     error++;
-                //   }
+                if (number(line_start, &pos, &column, line, tokens))
+                  {
+                    error++;
+                  }
               }
             else
               {
