@@ -348,15 +348,18 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
                         || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_ND
                         || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_NL
                         || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_NO
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_MN
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_MC
                         || codepoint == '_')
                   {
                     pos += bytes_read;
-                    length++;
+                    length += bytes_read;
                     column++;
                   }
 
                 tokensPush(tokens, newToken(TOKEN_NAME, start, length, line,
                                             column - length));
+
                 pos -= bytes_read;
                 column--;
               }

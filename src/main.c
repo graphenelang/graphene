@@ -23,7 +23,7 @@
 #include <utf8proc.h>
 
 #define UTF8PROC_OPTIONS                                                      \
-  (UTF8PROC_NULLTERM | UTF8PROC_DECOMPOSE | UTF8PROC_IGNORE)
+  (UTF8PROC_NULLTERM | UTF8PROC_COMPOSE | UTF8PROC_IGNORE)
 
 utf8proc_ssize_t
 readLine(uint8_t **dest)
