@@ -330,6 +330,36 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
                     error++;
                   }
               }
+            else if (utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LU
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LL
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LT
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LO
+                     || codepoint == '_')
+              {
+                uint8_t *start = pos;
+                int length     = 0;
+
+                while (
+                    bytes_read = utf8proc_iterate(pos, -1, &codepoint),
+                    utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LU
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LL
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LT
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_LO
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_ND
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_NL
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_NO
+                        || codepoint == '_')
+                  {
+                    pos += bytes_read;
+                    length++;
+                    column++;
+                  }
+
+                tokensPush(tokens, newToken(TOKEN_NAME, start, length, line,
+                                            column - length));
+                pos -= bytes_read;
+                column--;
+              }
             else
               {
                 printError(line_start, line, column, "Unexpected character");
