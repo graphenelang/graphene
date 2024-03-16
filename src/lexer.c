@@ -363,6 +363,40 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
                 pos -= bytes_read;
                 column--;
               }
+            else if (utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SC
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SK
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SM
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SO)
+              {
+                uint8_t *start = pos;
+                int length     = 0;
+                while (
+                    bytes_read = utf8proc_iterate(pos, -1, &codepoint),
+                    utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SC
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SK
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SM
+                        || utf8proc_category(codepoint)
+                               == UTF8PROC_CATEGORY_SO)
+                  {
+                    pos += bytes_read;
+                    length += bytes_read;
+                    column++;
+                  }
+
+                if (length == 1 && *start == '=')
+                  {
+                    tokensPush(tokens, newToken(TOKEN_EQUAL, start, length,
+                                                line, column - length));
+                  }
+                else
+                  {
+                    tokensPush(tokens, newToken(TOKEN_OPERATOR, start, length,
+                                                line, column - length));
+                  }
+
+                pos -= bytes_read;
+                column--;
+              }
             else
               {
                 printError(line_start, line, column, "Unexpected character");

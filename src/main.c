@@ -99,8 +99,8 @@ compile(uint8_t *source, utf8proc_ssize_t source_len)
   for (i = 0; i < tokens.length; i++)
     {
       Token token = tokens.tokens[i];
-      printf("%d:%d \"%.*s\"\n", token.line, token.column, token.length,
-             token.start);
+      printf("%d { %d:%d \"%.*s\" }\n", token.type, token.line, token.column,
+             token.length, token.start);
     }
 
   tokensFree(&tokens);
