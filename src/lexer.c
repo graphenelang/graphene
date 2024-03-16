@@ -296,9 +296,6 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
           column     = 0;
           line++;
           break;
-        case '@':
-          tokensPush(tokens, newToken(TOKEN_AT, pos, 1, line, column));
-          break;
         case '{':
           tokensPush(tokens, newToken(TOKEN_LBRACE, pos, 1, line, column));
           break;
@@ -310,16 +307,6 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
           break;
         case ')':
           tokensPush(tokens, newToken(TOKEN_RPAREN, pos, 1, line, column));
-          break;
-        case ',':
-          tokensPush(tokens, newToken(TOKEN_COMMA, pos, 1, line, column));
-          break;
-        // TODO: equals
-        case '.':
-          tokensPush(tokens, newToken(TOKEN_DOT, pos, 1, line, column));
-          break;
-        case ':':
-          tokensPush(tokens, newToken(TOKEN_COLON, pos, 1, line, column));
           break;
         default:
           {
@@ -366,7 +353,9 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
             else if (utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SC
                      || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SK
                      || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SM
-                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SO)
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SO
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_PO
+                     || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_PD)
               {
                 uint8_t *start = pos;
                 int length     = 0;
@@ -375,8 +364,10 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
                     utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SC
                         || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SK
                         || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SM
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_SO
+                        || utf8proc_category(codepoint) == UTF8PROC_CATEGORY_PO
                         || utf8proc_category(codepoint)
-                               == UTF8PROC_CATEGORY_SO)
+                               == UTF8PROC_CATEGORY_PD)
                   {
                     pos += bytes_read;
                     length += bytes_read;
@@ -386,6 +377,27 @@ tokenize(uint8_t *source, Tokens *tokens, utf8proc_ssize_t source_len)
                 if (length == 1 && *start == '=')
                   {
                     tokensPush(tokens, newToken(TOKEN_EQUAL, start, length,
+                                                line, column - length));
+                  }
+                else if (length == 1 && *start == '@')
+                  {
+                    tokensPush(tokens, newToken(TOKEN_AT, start, length, line,
+                                                column - length));
+                  }
+
+                else if (length == 1 && *start == ',')
+                  {
+                    tokensPush(tokens, newToken(TOKEN_COMMA, start, length,
+                                                line, column - length));
+                  }
+                else if (length == 1 && *start == '.')
+                  {
+                    tokensPush(tokens, newToken(TOKEN_DOT, start, length, line,
+                                                column - length));
+                  }
+                else if (length == 1 && *start == ':')
+                  {
+                    tokensPush(tokens, newToken(TOKEN_COLON, start, length,
                                                 line, column - length));
                   }
                 else
