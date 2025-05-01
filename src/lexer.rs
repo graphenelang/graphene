@@ -85,6 +85,70 @@ impl<'a> Lexer<'a> {
                             self.column,
                         ));
                     }
+                    "{" => {
+                        tokens.push(Token::new(
+                            TokenType::Lbrace,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    "}" => {
+                        tokens.push(Token::new(
+                            TokenType::Rbrace,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    "(" => {
+                        tokens.push(Token::new(
+                            TokenType::Lparen,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    ")" => {
+                        tokens.push(Token::new(
+                            TokenType::Rparen,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    "," => {
+                        tokens.push(Token::new(
+                            TokenType::Comma,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    "=" => {
+                        tokens.push(Token::new(
+                            TokenType::Equal,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    ":" => {
+                        tokens.push(Token::new(
+                            TokenType::Colon,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
+                    "." => {
+                        tokens.push(Token::new(
+                            TokenType::Dot,
+                            grapheme.to_string(),
+                            self.line,
+                            self.column,
+                        ));
+                    }
                     _ => {
                         errors.push(LexError::new(
                             self.lines[self.line - 1].as_str(),
