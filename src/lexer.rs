@@ -20,23 +20,23 @@ use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 use crate::token::{self, Token, TokenType};
 
 pub struct Lexer<'a> {
-    lines: Vec<Graphemes<'a>>,
+    source: &'a str,
     line: usize,
     column: usize,
     tokens: Vec<Token>,
-    errors: Vec<LexError<'a>>,
+    errors: Vec<LexError>,
 }
 
 #[derive(Debug, Clone)]
-pub struct LexError<'a> {
-    line: &'a str,
+pub struct LexError {
+    line: String,
     line_number: usize,
     column: usize,
     message: String,
 }
 
-impl<'a> LexError<'a> {
-    pub fn new(line: &'a str, line_number: usize, column: usize, message: String) -> Self {
+impl LexError {
+    pub fn new(line: String, line_number: usize, column: usize, message: String) -> Self {
         LexError {
             line,
             line_number,
@@ -46,7 +46,7 @@ impl<'a> LexError<'a> {
     }
 }
 
-impl<'a> std::fmt::Display for LexError<'a> {
+impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{} | {}\n", self.line_number, self.line)?;
         let mut i = 0;
@@ -61,13 +61,8 @@ impl<'a> std::fmt::Display for LexError<'a> {
 
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
-        let lines: Vec<Graphemes<'a>> = source
-            .split("\n")
-            .map(|line| line.graphemes(true))
-            .collect();
-
         Lexer {
-            lines,
+            source,
             line: 1,
             column: 1,
             tokens: Vec::new(),
@@ -76,8 +71,15 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn tokenize(&mut self) -> Result<&Vec<Token>, &Vec<LexError>> {
-        for line in self.lines.clone() {
-            let graphemes: Vec<&str> = line.collect();
+        let lines: Vec<Graphemes<'a>> = self
+            .source
+            .split("\n")
+            .map(|line| line.graphemes(true))
+            .collect();
+
+        for line in lines {
+            self.column = 1;
+            let graphemes: Vec<&str> = line.clone().collect();
             while self.column - 1 < graphemes.len() {
                 let grapheme = graphemes[self.column - 1];
                 self.column += 1;
@@ -159,7 +161,7 @@ impl<'a> Lexer<'a> {
                     }
                     _ => {
                         self.errors.push(LexError::new(
-                            self.lines[self.line - 1].as_str(),
+                            line.as_str().to_string(),
                             self.line,
                             self.column - 1,
                             format!("Unexpected character: {}", grapheme),
@@ -180,7 +182,8 @@ impl<'a> Lexer<'a> {
 
     fn number(&mut self, graphemes: &Vec<&str>) {
         let token_col = self.column - 1;
-        let mut float = false;
+        let mut is_float = false;
+        let mut is_scientific = false;
         let mut number = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
@@ -188,35 +191,62 @@ impl<'a> Lexer<'a> {
                 number.push_str(grapheme);
                 self.column += 1;
             } else if grapheme == "." {
-                if float {
+                if is_float {
                     self.errors.push(LexError::new(
-                        self.lines[self.line - 1].as_str(),
+                        graphemes.concat(),
                         self.line,
                         self.column,
-                        format!("number may not contain multiple '.'"),
+                        format!("number may not contain multiple fractional parts"),
                     ));
                     return;
                 }
-                float = true;
+                is_float = true;
                 number.push_str(grapheme);
                 self.column += 1;
                 if self.column - 1 >= graphemes.len() {
                     self.errors.push(LexError::new(
-                        self.lines[self.line - 1].as_str(),
+                        graphemes.concat(),
                         self.line,
-                        self.column,
+                        self.column - 1,
                         format!("expected at least one digit after '.'"),
                     ));
                     return;
                 }
             } else if grapheme == "_" {
                 self.column += 1;
+            } else if grapheme == "e" || grapheme == "E" {
+                if is_scientific {
+                    self.errors.push(LexError::new(
+                        graphemes.concat(),
+                        self.line,
+                        self.column,
+                        format!("number may not contain multiple exponential parts"),
+                    ));
+                    return;
+                }
+                is_float = true;
+                is_scientific = true;
+                number.push_str(grapheme);
+                self.column += 1;
+                if self.column - 1 >= graphemes.len() {
+                    self.errors.push(LexError::new(
+                        graphemes.concat(),
+                        self.line,
+                        self.column - 1,
+                        format!("expected at least one digit after 'e'"),
+                    ));
+                    return;
+                }
+                if graphemes[self.column - 1] == "+" || graphemes[self.column - 1] == "-" {
+                    number.push_str(graphemes[self.column - 1]);
+                    self.column += 1;
+                }
             } else {
                 break;
             }
         }
         self.tokens.push(Token::new(
-            if float {
+            if is_float {
                 TokenType::Float
             } else {
                 TokenType::Integer

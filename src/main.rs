@@ -41,7 +41,7 @@ fn repl() {
             Err(ReadlineError::Interrupted) => break,
             Err(ReadlineError::Eof) => break,
             Err(err) => {
-                return Err(err).expect("Error reading line");
+                panic!("{}", err);
             }
         }
     }
