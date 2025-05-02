@@ -23,8 +23,11 @@ pub struct Lexer<'a> {
     lines: Vec<Graphemes<'a>>,
     line: usize,
     column: usize,
+    tokens: Vec<Token>,
+    errors: Vec<LexError<'a>>,
 }
 
+#[derive(Debug, Clone)]
 pub struct LexError<'a> {
     line: &'a str,
     line_number: usize,
@@ -67,13 +70,12 @@ impl<'a> Lexer<'a> {
             lines,
             line: 1,
             column: 1,
+            tokens: Vec::new(),
+            errors: Vec::new(),
         }
     }
 
-    pub fn tokenize(&mut self) -> Result<Vec<Token>, Vec<LexError>> {
-        let mut tokens = Vec::new();
-        let mut errors = Vec::new();
-
+    pub fn tokenize(&mut self) -> Result<&Vec<Token>, &Vec<LexError>> {
         for line in self.lines.clone() {
             let graphemes: Vec<&str> = line.collect();
             while self.column - 1 < graphemes.len() {
@@ -81,7 +83,7 @@ impl<'a> Lexer<'a> {
                 self.column += 1;
                 match grapheme {
                     "@" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::At,
                             grapheme.to_string(),
                             self.line,
@@ -89,7 +91,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "{" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Lbrace,
                             grapheme.to_string(),
                             self.line,
@@ -97,7 +99,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "}" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Rbrace,
                             grapheme.to_string(),
                             self.line,
@@ -105,7 +107,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "(" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Lparen,
                             grapheme.to_string(),
                             self.line,
@@ -113,7 +115,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     ")" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Rparen,
                             grapheme.to_string(),
                             self.line,
@@ -121,7 +123,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "," => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Comma,
                             grapheme.to_string(),
                             self.line,
@@ -129,7 +131,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "=" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Equal,
                             grapheme.to_string(),
                             self.line,
@@ -137,7 +139,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     ":" => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Colon,
                             grapheme.to_string(),
                             self.line,
@@ -145,7 +147,7 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "." => {
-                        tokens.push(Token::new(
+                        self.tokens.push(Token::new(
                             TokenType::Dot,
                             grapheme.to_string(),
                             self.line,
@@ -153,13 +155,13 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                     "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
-                        tokens.push(self.number(&graphemes));
+                        self.number(&graphemes);
                     }
                     _ => {
-                        errors.push(LexError::new(
+                        self.errors.push(LexError::new(
                             self.lines[self.line - 1].as_str(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                             format!("Unexpected character: {}", grapheme),
                         ));
                     }
@@ -169,25 +171,59 @@ impl<'a> Lexer<'a> {
             self.line += 1;
         }
 
-        if errors.is_empty() {
-            Ok(tokens)
+        if self.errors.is_empty() {
+            Ok(&self.tokens)
         } else {
-            Err(errors)
+            Err(&self.errors)
         }
     }
 
-    fn number(&mut self, graphemes: &Vec<&str>) -> Token {
+    fn number(&mut self, graphemes: &Vec<&str>) {
         let token_col = self.column - 1;
+        let mut float = false;
         let mut number = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
-            if grapheme.chars().next().unwrap_or('0').is_digit(10) {
+            if grapheme.chars().next().unwrap_or('\0').is_digit(10) {
                 number.push_str(grapheme);
+                self.column += 1;
+            } else if grapheme == "." {
+                if float {
+                    self.errors.push(LexError::new(
+                        self.lines[self.line - 1].as_str(),
+                        self.line,
+                        self.column,
+                        format!("number may not contain multiple '.'"),
+                    ));
+                    return;
+                }
+                float = true;
+                number.push_str(grapheme);
+                self.column += 1;
+                if self.column - 1 >= graphemes.len() {
+                    self.errors.push(LexError::new(
+                        self.lines[self.line - 1].as_str(),
+                        self.line,
+                        self.column,
+                        format!("expected at least one digit after '.'"),
+                    ));
+                    return;
+                }
+            } else if grapheme == "_" {
                 self.column += 1;
             } else {
                 break;
             }
         }
-        Token::new(TokenType::Integer, number, self.line, token_col)
+        self.tokens.push(Token::new(
+            if float {
+                TokenType::Float
+            } else {
+                TokenType::Integer
+            },
+            number,
+            self.line,
+            token_col,
+        ))
     }
 }
