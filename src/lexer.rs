@@ -17,7 +17,7 @@
 
 use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 
-use crate::token::{Token, TokenType};
+use crate::token::{self, Token, TokenType};
 
 pub struct Lexer<'a> {
     lines: Vec<Graphemes<'a>>,
@@ -75,14 +75,17 @@ impl<'a> Lexer<'a> {
         let mut errors = Vec::new();
 
         for line in self.lines.clone() {
-            for grapheme in line {
+            let graphemes: Vec<&str> = line.collect();
+            while self.column - 1 < graphemes.len() {
+                let grapheme = graphemes[self.column - 1];
+                self.column += 1;
                 match grapheme {
                     "@" => {
                         tokens.push(Token::new(
                             TokenType::At,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     "{" => {
@@ -90,7 +93,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Lbrace,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     "}" => {
@@ -98,7 +101,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Rbrace,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     "(" => {
@@ -106,7 +109,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Lparen,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     ")" => {
@@ -114,7 +117,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Rparen,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     "," => {
@@ -122,7 +125,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Comma,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     "=" => {
@@ -130,7 +133,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Equal,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     ":" => {
@@ -138,7 +141,7 @@ impl<'a> Lexer<'a> {
                             TokenType::Colon,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
                     }
                     "." => {
@@ -146,8 +149,11 @@ impl<'a> Lexer<'a> {
                             TokenType::Dot,
                             grapheme.to_string(),
                             self.line,
-                            self.column,
+                            self.column - 1,
                         ));
+                    }
+                    "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
+                        tokens.push(self.number(&graphemes));
                     }
                     _ => {
                         errors.push(LexError::new(
@@ -158,7 +164,6 @@ impl<'a> Lexer<'a> {
                         ));
                     }
                 }
-                self.column += 1;
             }
 
             self.line += 1;
@@ -169,5 +174,20 @@ impl<'a> Lexer<'a> {
         } else {
             Err(errors)
         }
+    }
+
+    fn number(&mut self, graphemes: &Vec<&str>) -> Token {
+        let token_col = self.column - 1;
+        let mut number = graphemes[self.column - 2].to_string();
+        while self.column - 1 < graphemes.len() {
+            let grapheme = graphemes[self.column - 1];
+            if grapheme.chars().next().unwrap_or('0').is_digit(10) {
+                number.push_str(grapheme);
+                self.column += 1;
+            } else {
+                break;
+            }
+        }
+        Token::new(TokenType::Integer, number, self.line, token_col)
     }
 }
