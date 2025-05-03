@@ -25,7 +25,14 @@ fn build_source(source: String) {
 }
 
 fn build_file(file: String) {
-    let source = std::fs::read_to_string(file).expect("Unable to read file");
+    let source = std::fs::read_to_string(file);
+    let source = match source {
+        Ok(source) => source,
+        Err(err) => {
+            println!("Error reading file: {}", err);
+            return;
+        }
+    };
 
     build_source(source);
 }

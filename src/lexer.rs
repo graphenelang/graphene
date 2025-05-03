@@ -181,7 +181,13 @@ impl<'a> Lexer<'a> {
                 is_float = true;
                 number.push_str(grapheme);
                 self.column += 1;
-                if self.column - 1 >= graphemes.len() {
+                if self.column - 1 >= graphemes.len()
+                    || !(graphemes[self.column - 1]
+                        .chars()
+                        .next()
+                        .unwrap_or('\0')
+                        .is_digit(10))
+                {
                     self.errors.push(LexError::new(
                         graphemes.concat(),
                         self.line,
@@ -218,6 +224,24 @@ impl<'a> Lexer<'a> {
                 if graphemes[self.column - 1] == "+" || graphemes[self.column - 1] == "-" {
                     number.push_str(graphemes[self.column - 1]);
                     self.column += 1;
+                }
+                if self.column < graphemes.len()
+                    && graphemes[self.column - 1]
+                        .chars()
+                        .next()
+                        .unwrap_or('\0')
+                        .is_digit(10)
+                {
+                    number.push_str(graphemes[self.column - 1]);
+                    self.column += 1;
+                } else {
+                    self.errors.push(LexError::new(
+                        graphemes.concat(),
+                        self.line,
+                        self.column - 1,
+                        format!("expected at least one digit after in exponent"),
+                    ));
+                    return;
                 }
             } else {
                 break;
