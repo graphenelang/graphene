@@ -65,6 +65,10 @@ fn is_name_char(c: char) -> bool {
     c.is_alphanumeric() || c.is_mark() || c == '_'
 }
 
+fn is_operator_char(c: char) -> bool {
+    c.is_symbol() || c.is_punctuation()
+}
+
 impl<'a> Lexer<'a> {
     pub fn new(source: &'a str) -> Self {
         Lexer {
@@ -90,14 +94,6 @@ impl<'a> Lexer<'a> {
                 let grapheme = graphemes[self.column - 1];
                 self.column += 1;
                 match grapheme {
-                    "@" => {
-                        self.tokens.push(Token::new(
-                            TokenType::At,
-                            grapheme.to_string(),
-                            self.line,
-                            self.column - 1,
-                        ));
-                    }
                     "{" => {
                         self.tokens.push(Token::new(
                             TokenType::Lbrace,
@@ -130,38 +126,6 @@ impl<'a> Lexer<'a> {
                             self.column - 1,
                         ));
                     }
-                    "," => {
-                        self.tokens.push(Token::new(
-                            TokenType::Comma,
-                            grapheme.to_string(),
-                            self.line,
-                            self.column - 1,
-                        ));
-                    }
-                    "=" => {
-                        self.tokens.push(Token::new(
-                            TokenType::Equal,
-                            grapheme.to_string(),
-                            self.line,
-                            self.column - 1,
-                        ));
-                    }
-                    ":" => {
-                        self.tokens.push(Token::new(
-                            TokenType::Colon,
-                            grapheme.to_string(),
-                            self.line,
-                            self.column - 1,
-                        ));
-                    }
-                    "." => {
-                        self.tokens.push(Token::new(
-                            TokenType::Dot,
-                            grapheme.to_string(),
-                            self.line,
-                            self.column - 1,
-                        ));
-                    }
                     "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
                         self.number(&graphemes);
                     }
@@ -169,6 +133,8 @@ impl<'a> Lexer<'a> {
                         let c = grapheme.chars().next().unwrap_or('\0');
                         if is_name_char(c) {
                             self.name_or_keyword(&graphemes);
+                        } else if is_operator_char(c) {
+                            self.operator(&graphemes);
                         } else {
                             self.errors.push(LexError::new(
                                 line.as_str().to_string(),
@@ -308,5 +274,31 @@ impl<'a> Lexer<'a> {
 
         self.tokens
             .push(Token::new(token_type, name, self.line, token_col));
+    }
+
+    fn operator(&mut self, graphemes: &Vec<&str>) {
+        let token_col = self.column - 2;
+        let mut operator = graphemes[self.column - 2].to_string();
+        while self.column - 1 < graphemes.len() {
+            let grapheme = graphemes[self.column - 1];
+            if is_operator_char(grapheme.chars().next().unwrap_or('\0')) {
+                operator.push_str(grapheme);
+                self.column += 1;
+            } else {
+                break;
+            }
+        }
+
+        let token_type = match operator.as_str() {
+            "=" => TokenType::Equal,
+            ":" => TokenType::Colon,
+            "," => TokenType::Comma,
+            "." => TokenType::Dot,
+            "@" => TokenType::At,
+            _ => TokenType::Operator,
+        };
+
+        self.tokens
+            .push(Token::new(token_type, operator, self.line, token_col));
     }
 }
