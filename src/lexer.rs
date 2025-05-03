@@ -131,7 +131,8 @@ impl<'a> Lexer<'a> {
                     }
                     _ => {
                         let c = grapheme.chars().next().unwrap_or('\0');
-                        if is_name_char(c) {
+                        if c.is_whitespace() {
+                        } else if is_name_char(c) {
                             self.name_or_keyword(&graphemes);
                         } else if is_operator_char(c) {
                             self.operator(&graphemes);
@@ -289,6 +290,11 @@ impl<'a> Lexer<'a> {
             }
         }
 
+        if operator.as_str() == "//" {
+            self.comment(graphemes);
+            return;
+        }
+
         let token_type = match operator.as_str() {
             "=" => TokenType::Equal,
             ":" => TokenType::Colon,
@@ -300,5 +306,14 @@ impl<'a> Lexer<'a> {
 
         self.tokens
             .push(Token::new(token_type, operator, self.line, token_col));
+    }
+
+    fn comment(&mut self, graphemes: &Vec<&str>) {
+        while self.column - 1 < graphemes.len() {
+            if graphemes[self.column - 1] == "\n" {
+                break;
+            }
+            self.column += 1;
+        }
     }
 }
