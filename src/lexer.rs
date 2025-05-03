@@ -131,6 +131,9 @@ impl<'a> Lexer<'a> {
                     "'" => {
                         self.character(&graphemes);
                     }
+                    "\"" => {
+                        self.string(&graphemes);
+                    }
                     _ => {
                         let c = grapheme.chars().next().unwrap_or('\0');
                         if c.is_whitespace() {
@@ -354,14 +357,108 @@ impl<'a> Lexer<'a> {
             ));
         }
         let mut char_value = String::new();
+        let mut char_len = 0;
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
-            if grapheme == "'" {
+            if grapheme == "\\" {
+                if self.column < graphemes.len() {
+                    self.column += 1;
+                    match graphemes[self.column - 1] {
+                        "a" => {
+                            char_value.push('\x07');
+                            self.column += 1;
+                        }
+                        "b" => {
+                            char_value.push('\x08');
+                            self.column += 1;
+                        }
+                        "f" => {
+                            char_value.push('\x0C');
+                            self.column += 1;
+                        }
+                        "n" => {
+                            char_value.push('\n');
+                            self.column += 1;
+                        }
+                        "r" => {
+                            char_value.push('\r');
+                            self.column += 1;
+                        }
+                        "t" => {
+                            char_value.push('\t');
+                            self.column += 1;
+                        }
+                        "v" => {
+                            char_value.push('\x0B');
+                            self.column += 1;
+                        }
+                        "\\" => {
+                            char_value.push('\\');
+                            self.column += 1;
+                        }
+                        "\"" => {
+                            char_value.push('"');
+                            self.column += 1;
+                        }
+                        "'" => {
+                            char_value.push('\"');
+                            self.column += 1;
+                        }
+                        "0" => {
+                            char_value.push('\0');
+                            self.column += 1;
+                        }
+                        "u" => {
+                            let mut escape = String::new();
+                            self.column += 1;
+                            println!("{}", graphemes[self.column - 1]);
+                            while self.column - 1 < graphemes.len()
+                                && graphemes[self.column - 1]
+                                    .chars()
+                                    .next()
+                                    .unwrap_or('\0')
+                                    .is_digit(16)
+                            {
+                                if escape.len() == 6 {
+                                    break;
+                                }
+                                escape.push_str(graphemes[self.column - 1]);
+                                self.column += 1;
+                            }
+                            if escape.len() != 4 && escape.len() != 6 {
+                                self.errors.push(LexError::new(
+                                    graphemes.concat(),
+                                    self.line,
+                                    self.column - 1,
+                                    format!("expected 4 or 6 hex digits after \\u"),
+                                ));
+                                return;
+                            }
+                            let codepoint = u32::from_str_radix(&escape, 16).unwrap_or(0);
+                            char_value.push(char::from_u32(codepoint).unwrap_or('\0'));
+                        }
+                        _ => {
+                            self.errors.push(LexError::new(
+                                graphemes.concat(),
+                                self.line,
+                                self.column - 1,
+                                format!(
+                                    "invalid escape sequence: \\{}",
+                                    graphemes[self.column - 1]
+                                ),
+                            ));
+                            return;
+                        }
+                    }
+                    char_len += 1;
+                }
+            } else if grapheme == "'" {
                 break;
             } else {
                 char_value.push_str(grapheme);
+                self.column += 1;
+                char_len += grapheme.chars().count();
             }
-            self.column += 1;
         }
 
         if self.column - 1 >= graphemes.len() || graphemes[self.column - 1] != "'" {
@@ -373,12 +470,12 @@ impl<'a> Lexer<'a> {
             ));
         }
 
-        if char_value.len() > 1 {
+        if char_len > 1 {
             self.errors.push(LexError::new(
                 graphemes.concat(),
                 self.line,
                 self.column - 1,
-                format!("character literal may only contain one character"),
+                format!("character literal may only contain one character or escape sequence"),
             ));
         }
 
@@ -387,6 +484,130 @@ impl<'a> Lexer<'a> {
         self.tokens.push(Token::new(
             TokenType::Char,
             char_value,
+            self.line,
+            token_col,
+        ));
+    }
+
+    fn string(&mut self, graphemes: &Vec<&str>) {
+        let token_col = self.column - 1;
+
+        let mut string_value = String::new();
+        while self.column - 1 < graphemes.len() {
+            let grapheme = graphemes[self.column - 1];
+            if grapheme == "\\" {
+                if self.column < graphemes.len() {
+                    self.column += 1;
+                    match graphemes[self.column - 1] {
+                        "a" => {
+                            string_value.push('\x07');
+                            self.column += 1;
+                        }
+                        "b" => {
+                            string_value.push('\x08');
+                            self.column += 1;
+                        }
+                        "f" => {
+                            string_value.push('\x0C');
+                            self.column += 1;
+                        }
+                        "n" => {
+                            string_value.push('\n');
+                            self.column += 1;
+                        }
+                        "r" => {
+                            string_value.push('\r');
+                            self.column += 1;
+                        }
+                        "t" => {
+                            string_value.push('\t');
+                            self.column += 1;
+                        }
+                        "v" => {
+                            string_value.push('\x0B');
+                            self.column += 1;
+                        }
+                        "\\" => {
+                            string_value.push('\\');
+                            self.column += 1;
+                        }
+                        "\"" => {
+                            string_value.push('"');
+                            self.column += 1;
+                        }
+                        "'" => {
+                            string_value.push('\"');
+                            self.column += 1;
+                        }
+                        "0" => {
+                            string_value.push('\0');
+                            self.column += 1;
+                        }
+                        "u" => {
+                            let mut escape = String::new();
+                            self.column += 1;
+                            println!("{}", graphemes[self.column - 1]);
+                            while self.column - 1 < graphemes.len()
+                                && graphemes[self.column - 1]
+                                    .chars()
+                                    .next()
+                                    .unwrap_or('\0')
+                                    .is_digit(16)
+                            {
+                                if escape.len() == 6 {
+                                    break;
+                                }
+                                escape.push_str(graphemes[self.column - 1]);
+                                self.column += 1;
+                            }
+                            if escape.len() != 4 && escape.len() != 6 {
+                                self.errors.push(LexError::new(
+                                    graphemes.concat(),
+                                    self.line,
+                                    self.column - 1,
+                                    format!("expected 4 or 6 hex digits after \\u"),
+                                ));
+                                return;
+                            }
+                            let codepoint = u32::from_str_radix(&escape, 16).unwrap_or(0);
+                            string_value.push(char::from_u32(codepoint).unwrap_or('\0'));
+                        }
+                        _ => {
+                            self.errors.push(LexError::new(
+                                graphemes.concat(),
+                                self.line,
+                                self.column - 1,
+                                format!(
+                                    "invalid escape sequence: \\{}",
+                                    graphemes[self.column - 1]
+                                ),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            } else if grapheme == "\"" {
+                break;
+            } else {
+                self.column += 1;
+                string_value.push_str(grapheme);
+            }
+        }
+
+        if self.column - 1 >= graphemes.len() || graphemes[self.column - 1] != "\"" {
+            self.errors.push(LexError::new(
+                graphemes.concat(),
+                self.line,
+                self.column - 1,
+                format!("unterminated string literal"),
+            ));
+        }
+
+        self.column += 1;
+
+        self.tokens.push(Token::new(
+            TokenType::String,
+            string_value,
             self.line,
             token_col,
         ));
