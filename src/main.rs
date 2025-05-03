@@ -12,7 +12,7 @@ struct Cli {
 }
 
 fn build_source(source: String) {
-    let source = source.nfd().collect::<String>();
+    let source = source.nfc().collect::<String>();
     let mut lexer = graphene::lexer::Lexer::new(&source);
     let result = lexer.tokenize();
     if let Err(err) = result {

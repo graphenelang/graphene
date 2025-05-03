@@ -16,7 +16,6 @@
 // along with graphene.  If not, see <https://www.gnu.org/licenses/>.
 
 use unicode_categories::UnicodeCategories;
-use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 
 use crate::token::{Token, TokenType};
@@ -128,6 +127,9 @@ impl<'a> Lexer<'a> {
                     }
                     "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => {
                         self.number(&graphemes);
+                    }
+                    "'" => {
+                        self.character(&graphemes);
                     }
                     _ => {
                         let c = grapheme.chars().next().unwrap_or('\0');
@@ -339,5 +341,54 @@ impl<'a> Lexer<'a> {
             }
             self.column += 1;
         }
+    }
+
+    fn character(&mut self, graphemes: &Vec<&str>) {
+        let token_col = self.column - 1;
+        if self.column - 1 >= graphemes.len() {
+            self.errors.push(LexError::new(
+                graphemes.concat(),
+                self.line,
+                self.column - 1,
+                format!("expected character after '"),
+            ));
+        }
+        let mut char_value = String::new();
+        while self.column - 1 < graphemes.len() {
+            let grapheme = graphemes[self.column - 1];
+            if grapheme == "'" {
+                break;
+            } else {
+                char_value.push_str(grapheme);
+            }
+            self.column += 1;
+        }
+
+        if self.column - 1 >= graphemes.len() || graphemes[self.column - 1] != "'" {
+            self.errors.push(LexError::new(
+                graphemes.concat(),
+                self.line,
+                self.column - 1,
+                format!("unterminated character literal"),
+            ));
+        }
+
+        if char_value.len() > 1 {
+            self.errors.push(LexError::new(
+                graphemes.concat(),
+                self.line,
+                self.column - 1,
+                format!("character literal may only contain one character"),
+            ));
+        }
+
+        self.column += 1;
+
+        self.tokens.push(Token::new(
+            TokenType::Char,
+            char_value,
+            self.line,
+            token_col,
+        ));
     }
 }
