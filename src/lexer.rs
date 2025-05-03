@@ -15,9 +15,11 @@
 // You should have received a copy of the GNU General Public License
 // along with graphene.  If not, see <https://www.gnu.org/licenses/>.
 
+use unicode_categories::UnicodeCategories;
+use unicode_normalization::UnicodeNormalization;
 use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 
-use crate::token::{self, Token, TokenType};
+use crate::token::{Token, TokenType};
 
 pub struct Lexer<'a> {
     source: &'a str,
@@ -57,6 +59,10 @@ impl std::fmt::Display for LexError {
 
         write!(f, "^ {}", self.message)
     }
+}
+
+fn is_name_char(c: char) -> bool {
+    c.is_alphanumeric() || c.is_mark() || c == '_'
 }
 
 impl<'a> Lexer<'a> {
@@ -160,12 +166,17 @@ impl<'a> Lexer<'a> {
                         self.number(&graphemes);
                     }
                     _ => {
-                        self.errors.push(LexError::new(
-                            line.as_str().to_string(),
-                            self.line,
-                            self.column - 1,
-                            format!("Unexpected character: {}", grapheme),
-                        ));
+                        let c = grapheme.chars().next().unwrap_or('\0');
+                        if is_name_char(c) {
+                            self.name_or_keyword(&graphemes);
+                        } else {
+                            self.errors.push(LexError::new(
+                                line.as_str().to_string(),
+                                self.line,
+                                self.column - 1,
+                                format!("Unexpected character: {}", grapheme),
+                            ));
+                        }
                     }
                 }
             }
@@ -255,5 +266,47 @@ impl<'a> Lexer<'a> {
             self.line,
             token_col,
         ))
+    }
+
+    fn name_or_keyword(&mut self, graphemes: &Vec<&str>) {
+        let token_col = self.column - 2;
+        let mut name = graphemes[self.column - 2].to_string();
+        while self.column - 1 < graphemes.len() {
+            let grapheme = graphemes[self.column - 1];
+            if is_name_char(grapheme.chars().next().unwrap_or('\0')) {
+                name.push_str(grapheme);
+                self.column += 1;
+            } else {
+                break;
+            }
+        }
+
+        let token_type = match name.as_str() {
+            "const" => TokenType::Const,
+            "entity" => TokenType::Entity,
+            "noinit" => TokenType::NoInit,
+            "enum" => TokenType::Enum,
+            "system" => TokenType::System,
+            "fn" => TokenType::Fn,
+            "extern" => TokenType::Extern,
+            "decorator" => TokenType::Decorator,
+            "macro" => TokenType::Macro,
+            "for" => TokenType::For,
+            "in" => TokenType::In,
+            "break" => TokenType::Break,
+            "continue" => TokenType::Continue,
+            "while" => TokenType::While,
+            "match" => TokenType::Match,
+            "if" => TokenType::If,
+            "else" => TokenType::Else,
+            "elseif" => TokenType::ElseIf,
+            "true" => TokenType::True,
+            "false" => TokenType::False,
+            "null" => TokenType::Null,
+            _ => TokenType::Name,
+        };
+
+        self.tokens
+            .push(Token::new(token_type, name, self.line, token_col));
     }
 }

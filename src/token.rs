@@ -19,7 +19,7 @@
 pub enum TokenType {
     At,
     Const,
-    Enttity,
+    Entity,
     Name,
     Operator,
     Lbrace,
@@ -35,8 +35,6 @@ pub enum TokenType {
     Extern,
     Decorator,
     Macro,
-    Try,
-    Catch,
     For,
     In,
     Break,

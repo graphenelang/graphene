@@ -1,6 +1,7 @@
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 use std::io::{Read, Result};
+use unicode_normalization::UnicodeNormalization;
 
 use clap::{Parser, Subcommand};
 
@@ -11,6 +12,7 @@ struct Cli {
 }
 
 fn build_source(source: String) {
+    let source = source.nfd().collect::<String>();
     let mut lexer = graphene::lexer::Lexer::new(&source);
     let result = lexer.tokenize();
     if let Err(err) = result {
