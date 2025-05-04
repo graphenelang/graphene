@@ -37,6 +37,7 @@ pub struct LexError {
 }
 
 impl LexError {
+    #[must_use]
     pub fn new(line: String, line_number: usize, column: usize, message: String) -> Self {
         LexError {
             line,
@@ -49,7 +50,7 @@ impl LexError {
 
 impl std::fmt::Display for LexError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} | {}\n", self.line_number, self.line)?;
+        writeln!(f, "{} | {}", self.line_number, self.line)?;
         let mut i = 0;
         while i < self.column + 3 {
             write!(f, " ")?;
@@ -69,6 +70,7 @@ fn is_operator_char(c: char) -> bool {
 }
 
 impl<'a> Lexer<'a> {
+    #[must_use]
     pub fn new(source: &'a str) -> Self {
         Lexer {
             source,
@@ -82,7 +84,7 @@ impl<'a> Lexer<'a> {
     pub fn tokenize(&mut self) -> Result<&Vec<Token>, &Vec<LexError>> {
         let lines: Vec<Graphemes<'a>> = self
             .source
-            .split("\n")
+            .split('\n')
             .map(|line| line.graphemes(true))
             .collect();
 
@@ -146,7 +148,7 @@ impl<'a> Lexer<'a> {
                                 line.as_str().to_string(),
                                 self.line,
                                 self.column - 1,
-                                format!("Unexpected character: {}", grapheme),
+                                format!("Unexpected character: {grapheme}"),
                             ));
                         }
                     }
@@ -163,14 +165,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn number(&mut self, graphemes: &Vec<&str>) {
+    fn number(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
         let mut is_float = false;
         let mut is_scientific = false;
         let mut number = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
-            if grapheme.chars().next().unwrap_or('\0').is_digit(10) {
+            if grapheme.chars().next().unwrap_or('\0').is_ascii_digit() {
                 number.push_str(grapheme);
                 self.column += 1;
             } else if grapheme == "." {
@@ -179,25 +181,25 @@ impl<'a> Lexer<'a> {
                         graphemes.concat(),
                         self.line,
                         self.column,
-                        format!("number may not contain multiple fractional parts"),
+                        "number may not contain multiple fractional parts".to_owned(),
                     ));
                     return;
                 }
                 is_float = true;
                 number.push_str(grapheme);
                 self.column += 1;
-                if self.column - 1 >= graphemes.len()
+                if self.column > graphemes.len()
                     || !(graphemes[self.column - 1]
                         .chars()
                         .next()
                         .unwrap_or('\0')
-                        .is_digit(10))
+                        .is_ascii_digit())
                 {
                     self.errors.push(LexError::new(
                         graphemes.concat(),
                         self.line,
                         self.column - 1,
-                        format!("expected at least one digit after '.'"),
+                        "expected at least one digit after '.'".to_owned(),
                     ));
                     return;
                 }
@@ -209,7 +211,7 @@ impl<'a> Lexer<'a> {
                         graphemes.concat(),
                         self.line,
                         self.column,
-                        format!("number may not contain multiple exponential parts"),
+                        "number may not contain multiple exponential parts".to_owned(),
                     ));
                     return;
                 }
@@ -217,12 +219,12 @@ impl<'a> Lexer<'a> {
                 is_scientific = true;
                 number.push_str(grapheme);
                 self.column += 1;
-                if self.column - 1 >= graphemes.len() {
+                if self.column > graphemes.len() {
                     self.errors.push(LexError::new(
                         graphemes.concat(),
                         self.line,
                         self.column - 1,
-                        format!("expected at least one digit after 'e'"),
+                        "expected at least one digit after 'e'".to_owned(),
                     ));
                     return;
                 }
@@ -235,7 +237,7 @@ impl<'a> Lexer<'a> {
                         .chars()
                         .next()
                         .unwrap_or('\0')
-                        .is_digit(10)
+                        .is_ascii_digit()
                 {
                     number.push_str(graphemes[self.column - 1]);
                     self.column += 1;
@@ -244,7 +246,7 @@ impl<'a> Lexer<'a> {
                         graphemes.concat(),
                         self.line,
                         self.column - 1,
-                        format!("expected at least one digit after in exponent"),
+                        "expected at least one digit after in exponent".to_owned(),
                     ));
                     return;
                 }
@@ -261,10 +263,10 @@ impl<'a> Lexer<'a> {
             number,
             self.line,
             token_col,
-        ))
+        ));
     }
 
-    fn name_or_keyword(&mut self, graphemes: &Vec<&str>) {
+    fn name_or_keyword(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 2;
         let mut name = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
@@ -306,7 +308,7 @@ impl<'a> Lexer<'a> {
             .push(Token::new(token_type, name, self.line, token_col));
     }
 
-    fn operator(&mut self, graphemes: &Vec<&str>) {
+    fn operator(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 2;
         let mut operator = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
@@ -337,7 +339,7 @@ impl<'a> Lexer<'a> {
             .push(Token::new(token_type, operator, self.line, token_col));
     }
 
-    fn comment(&mut self, graphemes: &Vec<&str>) {
+    fn comment(&mut self, graphemes: &[&str]) {
         while self.column - 1 < graphemes.len() {
             if graphemes[self.column - 1] == "\n" {
                 break;
@@ -346,14 +348,14 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn character(&mut self, graphemes: &Vec<&str>) {
+    fn character(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
-        if self.column - 1 >= graphemes.len() {
+        if self.column > graphemes.len() {
             self.errors.push(LexError::new(
                 graphemes.concat(),
                 self.line,
                 self.column - 1,
-                format!("expected character after '"),
+                "expected character after '".to_owned(),
             ));
         }
         let mut char_value = String::new();
@@ -401,7 +403,7 @@ impl<'a> Lexer<'a> {
                             self.column += 1;
                         }
                         "'" => {
-                            char_value.push('\"');
+                            char_value.push('\'');
                             self.column += 1;
                         }
                         "0" => {
@@ -417,7 +419,7 @@ impl<'a> Lexer<'a> {
                                     .chars()
                                     .next()
                                     .unwrap_or('\0')
-                                    .is_digit(16)
+                                    .is_ascii_hexdigit()
                             {
                                 if escape.len() == 6 {
                                     break;
@@ -430,7 +432,7 @@ impl<'a> Lexer<'a> {
                                     graphemes.concat(),
                                     self.line,
                                     self.column - 1,
-                                    format!("expected 4 or 6 hex digits after \\u"),
+                                    "expected 4 or 6 hex digits after \\u".to_owned(),
                                 ));
                                 return;
                             }
@@ -451,6 +453,14 @@ impl<'a> Lexer<'a> {
                         }
                     }
                     char_len += 1;
+                } else {
+                    self.errors.push(LexError::new(
+                        graphemes.concat(),
+                        self.line,
+                        self.column - 1,
+                        "expected character after '\\'".to_owned(),
+                    ));
+                    return;
                 }
             } else if grapheme == "'" {
                 break;
@@ -461,21 +471,22 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if self.column - 1 >= graphemes.len() || graphemes[self.column - 1] != "'" {
+        if self.column > graphemes.len() || graphemes[self.column - 1] != "'" {
             self.errors.push(LexError::new(
                 graphemes.concat(),
                 self.line,
                 self.column - 1,
-                format!("unterminated character literal"),
+                "unterminated character literal".to_owned(),
             ));
         }
 
-        if char_len > 1 {
+        if char_len != 1 {
             self.errors.push(LexError::new(
                 graphemes.concat(),
                 self.line,
                 self.column - 1,
-                format!("character literal may only contain one character or escape sequence"),
+                "character literal must consist of a single character or escape sequence"
+                    .to_owned(),
             ));
         }
 
@@ -489,7 +500,7 @@ impl<'a> Lexer<'a> {
         ));
     }
 
-    fn string(&mut self, graphemes: &Vec<&str>) {
+    fn string(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
 
         let mut string_value = String::new();
@@ -536,7 +547,7 @@ impl<'a> Lexer<'a> {
                             self.column += 1;
                         }
                         "'" => {
-                            string_value.push('\"');
+                            string_value.push('\'');
                             self.column += 1;
                         }
                         "0" => {
@@ -552,7 +563,7 @@ impl<'a> Lexer<'a> {
                                     .chars()
                                     .next()
                                     .unwrap_or('\0')
-                                    .is_digit(16)
+                                    .is_ascii_hexdigit()
                             {
                                 if escape.len() == 6 {
                                     break;
@@ -565,7 +576,7 @@ impl<'a> Lexer<'a> {
                                     graphemes.concat(),
                                     self.line,
                                     self.column - 1,
-                                    format!("expected 4 or 6 hex digits after \\u"),
+                                    "expected 4 or 6 hex digits after \\u".to_owned(),
                                 ));
                                 return;
                             }
@@ -585,6 +596,14 @@ impl<'a> Lexer<'a> {
                             return;
                         }
                     }
+                } else {
+                    self.errors.push(LexError::new(
+                        graphemes.concat(),
+                        self.line,
+                        self.column - 1,
+                        "expected character after '\\'".to_owned(),
+                    ));
+                    return;
                 }
             } else if grapheme == "\"" {
                 break;
@@ -594,12 +613,12 @@ impl<'a> Lexer<'a> {
             }
         }
 
-        if self.column - 1 >= graphemes.len() || graphemes[self.column - 1] != "\"" {
+        if self.column > graphemes.len() || graphemes[self.column - 1] != "\"" {
             self.errors.push(LexError::new(
                 graphemes.concat(),
                 self.line,
                 self.column - 1,
-                format!("unterminated string literal"),
+                "unterminated string literal".to_owned(),
             ));
         }
 
