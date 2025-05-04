@@ -90,7 +90,7 @@ impl<'a> Lexer<'a> {
 
         for line in lines {
             self.column = 1;
-            let graphemes: Vec<&str> = line.clone().collect();
+            let graphemes: Vec<&str> = line.collect();
             while self.column - 1 < graphemes.len() {
                 let grapheme = graphemes[self.column - 1];
                 self.column += 1;
@@ -145,7 +145,7 @@ impl<'a> Lexer<'a> {
                             self.operator(&graphemes);
                         } else {
                             self.errors.push(LexError::new(
-                                line.as_str().to_string(),
+                                graphemes.concat(),
                                 self.line,
                                 self.column - 1,
                                 format!("Unexpected character: {grapheme}"),
@@ -358,7 +358,7 @@ impl<'a> Lexer<'a> {
                 "expected character after '".to_owned(),
             ));
         }
-        let mut char_value = String::new();
+        let mut char_value = String::with_capacity(1);
         let mut char_len = 0;
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
@@ -411,9 +411,8 @@ impl<'a> Lexer<'a> {
                             self.column += 1;
                         }
                         "u" => {
-                            let mut escape = String::new();
+                            let mut escape = String::with_capacity(6);
                             self.column += 1;
-                            println!("{}", graphemes[self.column - 1]);
                             while self.column - 1 < graphemes.len()
                                 && graphemes[self.column - 1]
                                     .chars()
@@ -478,6 +477,7 @@ impl<'a> Lexer<'a> {
                 self.column - 1,
                 "unterminated character literal".to_owned(),
             ));
+            return;
         }
 
         if char_len != 1 {
@@ -503,7 +503,7 @@ impl<'a> Lexer<'a> {
     fn string(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
 
-        let mut string_value = String::new();
+        let mut string_value = String::with_capacity(16);
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
             if grapheme == "\\" {
@@ -555,9 +555,8 @@ impl<'a> Lexer<'a> {
                             self.column += 1;
                         }
                         "u" => {
-                            let mut escape = String::new();
+                            let mut escape = String::with_capacity(6);
                             self.column += 1;
-                            println!("{}", graphemes[self.column - 1]);
                             while self.column - 1 < graphemes.len()
                                 && graphemes[self.column - 1]
                                     .chars()
