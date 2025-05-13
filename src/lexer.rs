@@ -28,7 +28,7 @@ pub struct Lexer<'a> {
     errors: Vec<LexError>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexError {
     line: String,
     line_number: usize,
@@ -159,6 +159,12 @@ impl<'a> Lexer<'a> {
         }
 
         if self.errors.is_empty() {
+            self.tokens.push(Token::new(
+                TokenType::EOF,
+                "".to_owned(),
+                self.line,
+                self.column,
+            ));
             Ok(&self.tokens)
         } else {
             Err(&self.errors)
@@ -267,7 +273,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn name_or_keyword(&mut self, graphemes: &[&str]) {
-        let token_col = self.column - 2;
+        let token_col = self.column - 1;
         let mut name = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
@@ -309,7 +315,7 @@ impl<'a> Lexer<'a> {
     }
 
     fn operator(&mut self, graphemes: &[&str]) {
-        let token_col = self.column - 2;
+        let token_col = self.column - 1;
         let mut operator = graphemes[self.column - 2].to_string();
         while self.column - 1 < graphemes.len() {
             let grapheme = graphemes[self.column - 1];
@@ -410,7 +416,7 @@ impl<'a> Lexer<'a> {
                             char_value.push('\0');
                             self.column += 1;
                         }
-                        "u" => {
+                        "u" | "U" => {
                             let mut escape = String::with_capacity(6);
                             self.column += 1;
                             while self.column - 1 < graphemes.len()
@@ -554,7 +560,7 @@ impl<'a> Lexer<'a> {
                             string_value.push('\0');
                             self.column += 1;
                         }
-                        "u" => {
+                        "u" | "U" => {
                             let mut escape = String::with_capacity(6);
                             self.column += 1;
                             while self.column - 1 < graphemes.len()
@@ -629,5 +635,64 @@ impl<'a> Lexer<'a> {
             self.line,
             token_col,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::token::TokenType;
+
+    #[test]
+    fn test_lexer_correct_input() {
+        let source = r#"
+const x = 5
+const y = 3.14
+const z = 1e10
+1.0
+"hello world"
+"\a\05á\U01F600®"
+'a'
+'≈'
+=
+--
+// this is a comment
+{}
+()
+"#;
+
+        let expected_output = vec![
+            Token::new(TokenType::Const, "const".to_owned(), 2, 1),
+            Token::new(TokenType::Name, "x".to_owned(), 2, 7),
+            Token::new(TokenType::Equal, "=".to_owned(), 2, 9),
+            Token::new(TokenType::Integer, "5".to_owned(), 2, 11),
+            Token::new(TokenType::Const, "const".to_owned(), 3, 1),
+            Token::new(TokenType::Name, "y".to_owned(), 3, 7),
+            Token::new(TokenType::Equal, "=".to_owned(), 3, 9),
+            Token::new(TokenType::Float, "3.14".to_owned(), 3, 11),
+            Token::new(TokenType::Const, "const".to_owned(), 4, 1),
+            Token::new(TokenType::Name, "z".to_owned(), 4, 7),
+            Token::new(TokenType::Equal, "=".to_owned(), 4, 9),
+            Token::new(TokenType::Float, "1e10".to_owned(), 4, 11),
+            Token::new(TokenType::Float, "1.0".to_owned(), 5, 1),
+            Token::new(TokenType::String, "hello world".to_owned(), 6, 1),
+            Token::new(TokenType::String, "\u{7}\05á\u{01F600}®".to_owned(), 7, 1),
+            Token::new(TokenType::Char, "a".to_owned(), 8, 1),
+            Token::new(TokenType::Char, "≈".to_owned(), 9, 1),
+            Token::new(TokenType::Equal, "=".to_owned(), 10, 1),
+            Token::new(TokenType::Operator, "--".to_owned(), 11, 1),
+            Token::new(TokenType::Lbrace, "{".to_owned(), 13, 1),
+            Token::new(TokenType::Rbrace, "}".to_owned(), 13, 2),
+            Token::new(TokenType::Lparen, "(".to_owned(), 14, 1),
+            Token::new(TokenType::Rparen, ")".to_owned(), 14, 2),
+            Token::new(TokenType::EOF, "".to_owned(), 16, 1),
+        ];
+        let mut lexer = Lexer::new(source);
+        let result = lexer.tokenize();
+        assert!(result.is_ok());
+        let tokens = result.unwrap();
+        for (i, token) in tokens.iter().enumerate() {
+            assert_eq!(token, &expected_output[i]);
+        }
     }
 }

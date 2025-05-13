@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with graphene.  If not, see <https://www.gnu.org/licenses/>.
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TokenType {
     At,
     Const,
@@ -53,9 +53,10 @@ pub enum TokenType {
     Integer,
     Float,
     Colon,
+    EOF,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub token_type: TokenType,
     pub value: String,

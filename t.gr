@@ -1,0 +1,14 @@
+
+const x = 5
+const y = 3.14
+const z = 1e10
+1.0
+"hello world"
+"\a\0á\U01F600®"
+'a'
+'≈'
+=
+--
+// this is a comment
+{}
+()
