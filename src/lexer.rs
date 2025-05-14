@@ -307,6 +307,7 @@ impl<'a> Lexer<'a> {
             "true" => TokenType::True,
             "false" => TokenType::False,
             "null" => TokenType::Null,
+            "dyn" => TokenType::Dyn,
             _ => TokenType::Name,
         };
 

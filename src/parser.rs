@@ -18,7 +18,7 @@
 use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 
 use crate::{
-    ast::{Pragma, Program},
+    ast::{Decorator, Pragma, Program},
     token::{Token, TokenType},
 };
 
@@ -122,15 +122,7 @@ impl<'a> Parser<'a> {
                     self.pragma();
                 }
                 _ => {
-                    self.errors.push(ParseError::new(
-                        "unexpected token".to_string(),
-                        self.lines[self.tokens[self.current].line - 1]
-                            .clone()
-                            .collect(),
-                        self.tokens[self.current].line,
-                        self.tokens[self.current].column,
-                    ));
-                    self.current += 1;
+                    self.declaration();
                 }
             }
         }
@@ -171,7 +163,7 @@ impl<'a> Parser<'a> {
                         self.lines[self.tokens[self.current].line - 2]
                             .clone()
                             .collect(),
-                        self.tokens[self.current].line,
+                        self.tokens[self.current].line - 1,
                         self.tokens[self.current].column,
                     ));
                     return;
@@ -192,5 +184,96 @@ impl<'a> Parser<'a> {
             }
         }
         self.program.pragmas.push(Pragma::new(name, arguments));
+    }
+
+    fn declaration(&mut self) {
+        if self.is_at_end() {
+            return;
+        }
+
+        let current_token = &self.tokens[self.current];
+        let mut decorators: Vec<Decorator> = Vec::new();
+        match current_token.token_type {
+            TokenType::At => {
+                self.current += 1;
+                let result = self.decorator();
+                if let Ok(decorator) = result {
+                    decorators.push(decorator);
+                } else if let Err(err) = result {
+                    self.errors.push(err);
+                    return;
+                }
+            }
+            _ => {
+                self.errors.push(ParseError::new(
+                    "expected decorator or declaration".to_string(),
+                    self.lines[self.tokens[self.current].line - 1]
+                        .clone()
+                        .collect(),
+                    self.tokens[self.current].line,
+                    self.tokens[self.current].column,
+                ));
+                self.current += 1;
+            }
+        }
+        println!("decorators: {decorators:?}");
+    }
+
+    fn decorator(&mut self) -> Result<Decorator, ParseError> {
+        if self.is_at_end() {
+            return Err(ParseError::new(
+                "expected decorator".to_string(),
+                self.lines[self.tokens[self.current].line - 1]
+                    .clone()
+                    .collect(),
+                self.tokens[self.current].line,
+                self.tokens[self.current].column,
+            ));
+        }
+        let name = &self.tokens[self.current];
+        self.current += 1;
+        if name.token_type != TokenType::Name {
+            return Err(ParseError::new(
+                "expected decorator name".to_string(),
+                self.lines[self.tokens[self.current].line - 1]
+                    .clone()
+                    .collect(),
+                self.tokens[self.current].line,
+                self.tokens[self.current].column,
+            ));
+        }
+
+        let mut arguments = Vec::new();
+        let mut open_parens = 0;
+        if self.tokens[self.current].token_type == TokenType::Lparen {
+            self.current += 1;
+            loop {
+                if self.is_at_end() {
+                    return Err(ParseError::new(
+                        "expected closing parenthesis".to_string(),
+                        self.lines[self.tokens[self.current].line - 2]
+                            .clone()
+                            .collect(),
+                        self.tokens[self.current].line - 1,
+                        self.tokens[self.current].column,
+                    ));
+                }
+                if self.tokens[self.current].token_type == TokenType::Lparen {
+                    open_parens += 1;
+                } else if self.tokens[self.current].token_type == TokenType::Rparen {
+                    if open_parens == 0 {
+                        break;
+                    }
+                    open_parens -= 1;
+                }
+                arguments.push(&self.tokens[self.current]);
+                self.current += 1;
+            }
+            if !self.is_at_end() {
+                self.current += 1; // consume the closing parenthesis
+            }
+        }
+
+        Ok(Decorator::new(name, arguments))
     }
 }

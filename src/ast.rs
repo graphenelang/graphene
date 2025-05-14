@@ -20,7 +20,7 @@ use crate::token::Token;
 #[derive(Debug, Clone)]
 pub struct Program<'a> {
     pub pragmas: Vec<Pragma<'a>>,
-    pub declarations: Vec<Declaration>,
+    pub declarations: Vec<Declaration<'a>>,
 }
 
 impl<'a> Program<'a> {
@@ -45,22 +45,22 @@ impl<'a> Pragma<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub enum Declaration {
-    Entity(EntityDeclaration),
+pub enum Declaration<'a> {
+    Entity(EntityDeclaration<'a>),
     System {
-        decorators: Vec<Decorator>,
+        decorators: Vec<Decorator<'a>>,
         name: Token,
         generics: Vec<Generic>,
         parameters: Vec<(Token, Type)>,
-        body: Vec<Expression>,
+        body: Vec<Expression<'a>>,
     },
     Function {
-        decorators: Vec<Decorator>,
+        decorators: Vec<Decorator<'a>>,
         name: Token,
         generics: Vec<Generic>,
         parameters: Vec<(Token, Type)>,
         return_type: Type,
-        body: Vec<Expression>,
+        body: Vec<Expression<'a>>,
     },
     Extern {
         name: Token,
@@ -69,11 +69,11 @@ pub enum Declaration {
     },
     Decorator {
         name: Token,
-        body: Vec<Expression>,
+        body: Vec<Expression<'a>>,
     },
     Macro {
         name: Token,
-        body: Vec<Expression>,
+        body: Vec<Expression<'a>>,
     },
 }
 
@@ -84,11 +84,11 @@ pub struct Generic {
 }
 
 #[derive(Debug, Clone)]
-pub enum EntityDeclaration {
+pub enum EntityDeclaration<'a> {
     Entity {
         is_const: bool,
         name: Token,
-        component_initializers: Vec<ComponentInitializer>,
+        component_initializers: Vec<ComponentInitializer<'a>>,
     },
     Component {
         name: Token,
@@ -102,9 +102,9 @@ pub enum EntityDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub struct ComponentInitializer {
+pub struct ComponentInitializer<'a> {
     pub component: Type,
-    pub fields: Vec<(Option<Token>, Expression)>,
+    pub fields: Vec<(Option<Token>, Expression<'a>)>,
 }
 
 #[derive(Debug, Clone)]
@@ -122,9 +122,15 @@ pub enum VariantDeclaration {
 }
 
 #[derive(Debug, Clone)]
-pub struct Decorator {
-    pub name: Token,
-    pub arguments: Vec<Token>,
+pub struct Decorator<'a> {
+    pub name: &'a Token,
+    pub arguments: Vec<&'a Token>,
+}
+
+impl<'a> Decorator<'a> {
+    pub fn new(name: &'a Token, arguments: Vec<&'a Token>) -> Self {
+        Decorator { name, arguments }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -137,49 +143,49 @@ pub enum Type {
 }
 
 #[derive(Debug, Clone)]
-pub enum Expression {
-    Declaration(Declaration),
-    Drop(Box<Expression>),
-    Add(Box<Expression>, ComponentInitializer),
-    Remove(Box<Expression>, ComponentInitializer),
+pub enum Expression<'a> {
+    Declaration(Declaration<'a>),
+    Drop(Box<Expression<'a>>),
+    Add(Box<Expression<'a>>, ComponentInitializer<'a>),
+    Remove(Box<Expression<'a>>, ComponentInitializer<'a>),
     For {
         variable: Token,
-        iterable: Box<Expression>,
-        body: Vec<Expression>,
+        iterable: Box<Expression<'a>>,
+        body: Vec<Expression<'a>>,
     },
-    Break(Option<Box<Expression>>),
+    Break(Option<Box<Expression<'a>>>),
     Continue,
     While {
-        condition: Box<Expression>,
-        body: Vec<Expression>,
-        else_body: Option<Vec<Expression>>,
+        condition: Box<Expression<'a>>,
+        body: Vec<Expression<'a>>,
+        else_body: Option<Vec<Expression<'a>>>,
     },
     Match {
-        expression: Box<Expression>,
-        cases: Vec<MatchArm>,
+        expression: Box<Expression<'a>>,
+        cases: Vec<MatchArm<'a>>,
     },
     If {
-        condition: Box<Expression>,
-        body: Vec<Expression>,
+        condition: Box<Expression<'a>>,
+        body: Vec<Expression<'a>>,
         else_if: Vec<()>,
-        else_body: Option<Vec<Expression>>,
+        else_body: Option<Vec<Expression<'a>>>,
     },
     Assignement {
-        lhs: (Option<Box<Expression>>, Token),
-        rhs: Box<Expression>,
+        lhs: (Option<Box<Expression<'a>>>, Token),
+        rhs: Box<Expression<'a>>,
     },
     Infix {
-        lhs: Box<Expression>,
+        lhs: Box<Expression<'a>>,
         operator: Token,
-        rhs: Box<Expression>,
+        rhs: Box<Expression<'a>>,
     },
     Prefix {
         operator: Token,
-        rhs: Box<Expression>,
+        rhs: Box<Expression<'a>>,
     },
     FunctionCall {
         name: Token,
-        arguments: Vec<Expression>,
+        arguments: Vec<Expression<'a>>,
     },
     MacroCall {
         name: Token,
@@ -190,10 +196,10 @@ pub enum Expression {
         arguments: Vec<Token>,
     },
     Literal(Token),
-    ArrayLiteral(Vec<Expression>),
-    TupleLiteral(Vec<Expression>),
-    MapLiteral(Vec<(Expression, Expression)>),
-    SetLiteral(Vec<Expression>),
+    ArrayLiteral(Vec<Expression<'a>>),
+    TupleLiteral(Vec<Expression<'a>>),
+    MapLiteral(Vec<(Expression<'a>, Expression<'a>)>),
+    SetLiteral(Vec<Expression<'a>>),
     True,
     False,
     Null,
@@ -202,9 +208,9 @@ pub enum Expression {
 }
 
 #[derive(Debug, Clone)]
-pub struct MatchArm {
+pub struct MatchArm<'a> {
     pub pattern: Pattern,
-    pub body: Vec<Expression>,
+    pub body: Vec<Expression<'a>>,
 }
 
 #[derive(Debug, Clone)]
