@@ -160,8 +160,37 @@ impl<'a> Parser<'a> {
         let name = &self.tokens[self.current];
         self.current += 1;
 
-        let arguments = Vec::new();
-        // TODO: Check for arguments
+        let mut arguments = Vec::new();
+        let mut open_parens = 0;
+        if self.tokens[self.current].token_type == TokenType::Lparen {
+            self.current += 1;
+            loop {
+                if self.is_at_end() {
+                    self.errors.push(ParseError::new(
+                        "expected closing parenthesis".to_string(),
+                        self.lines[self.tokens[self.current].line - 2]
+                            .clone()
+                            .collect(),
+                        self.tokens[self.current].line,
+                        self.tokens[self.current].column,
+                    ));
+                    return;
+                }
+                if self.tokens[self.current].token_type == TokenType::Lparen {
+                    open_parens += 1;
+                } else if self.tokens[self.current].token_type == TokenType::Rparen {
+                    if open_parens == 0 {
+                        break;
+                    }
+                    open_parens -= 1;
+                }
+                arguments.push(&self.tokens[self.current]);
+                self.current += 1;
+            }
+            if !self.is_at_end() {
+                self.current += 1; // consume the closing parenthesis
+            }
+        }
         self.program.pragmas.push(Pragma::new(name, arguments));
     }
 }

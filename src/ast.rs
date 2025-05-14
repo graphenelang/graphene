@@ -35,11 +35,11 @@ impl<'a> Program<'a> {
 #[derive(Debug, Clone)]
 pub struct Pragma<'a> {
     pub name: &'a Token,
-    pub arguments: Vec<Token>,
+    pub arguments: Vec<&'a Token>,
 }
 
 impl<'a> Pragma<'a> {
-    pub fn new(name: &'a Token, arguments: Vec<Token>) -> Self {
+    pub fn new(name: &'a Token, arguments: Vec<&'a Token>) -> Self {
         Pragma { name, arguments }
     }
 }
