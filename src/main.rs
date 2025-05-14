@@ -20,6 +20,15 @@ fn build_source(source: &str) {
         }
     } else if let Ok(tokens) = result {
         println!("tokens: {tokens:?}");
+        let mut parser = graphene::parser::Parser::new(&source, tokens);
+        let result = parser.parse();
+        if let Err(err) = result {
+            for err in err {
+                println!("{err}");
+            }
+        } else if let Ok(program) = result {
+            println!("program: {program:?}");
+        }
     }
 }
 

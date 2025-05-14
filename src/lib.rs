@@ -15,5 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with graphene.  If not, see <https://www.gnu.org/licenses/>.
 
+pub mod ast;
 pub mod lexer;
+pub mod parser;
 pub mod token;
