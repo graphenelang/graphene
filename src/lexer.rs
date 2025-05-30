@@ -317,18 +317,9 @@ impl<'a> Lexer<'a> {
 
     fn operator(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
-        let mut operator = graphemes[self.column - 2].to_string();
-        while self.column - 1 < graphemes.len() {
-            let grapheme = graphemes[self.column - 1];
-            if is_operator_char(grapheme.chars().next().unwrap_or('\0')) {
-                operator.push_str(grapheme);
-                self.column += 1;
-            } else {
-                break;
-            }
-        }
-
-        if operator.as_str() == "//" {
+        let operator = graphemes[self.column - 2].to_string();
+        if operator == "/" && self.column - 1 < graphemes.len() && graphemes[self.column - 1] == "/"
+        {
             self.comment(graphemes);
             return;
         }

@@ -27,7 +27,7 @@ fn build_source(source: &str) {
                 println!("{err}");
             }
         } else if let Ok(program) = result {
-            println!("program: {program:?}");
+            println!("program: {program:#?}");
         }
     }
 }

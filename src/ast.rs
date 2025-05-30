@@ -50,22 +50,22 @@ pub enum Declaration<'a> {
     System {
         decorators: Vec<Decorator<'a>>,
         name: Token,
-        generics: Vec<Generic>,
-        parameters: Vec<(Token, Type)>,
+        generics: Vec<Generic<'a>>,
+        parameters: Vec<(Token, Type<'a>)>,
         body: Vec<Expression<'a>>,
     },
     Function {
         decorators: Vec<Decorator<'a>>,
         name: Token,
-        generics: Vec<Generic>,
-        parameters: Vec<(Token, Type)>,
-        return_type: Type,
+        generics: Vec<Generic<'a>>,
+        parameters: Vec<(Token, Type<'a>)>,
+        return_type: Type<'a>,
         body: Vec<Expression<'a>>,
     },
     Extern {
         name: Token,
-        parameters: Vec<(Token, Type)>,
-        return_type: Type,
+        parameters: Vec<(Token, Type<'a>)>,
+        return_type: Type<'a>,
     },
     Decorator {
         name: Token,
@@ -78,47 +78,47 @@ pub enum Declaration<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub struct Generic {
+pub struct Generic<'a> {
     pub name: Token,
-    pub constraints: Vec<Type>,
+    pub constraints: Vec<Type<'a>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum EntityDeclaration<'a> {
     Entity {
         is_const: bool,
-        name: Token,
+        name: &'a Token,
         component_initializers: Vec<ComponentInitializer<'a>>,
     },
     Component {
         name: Token,
         // TODO: generics
-        field_declarations: Vec<FieldDeclaration>,
+        field_declarations: Vec<FieldDeclaration<'a>>,
     },
     Enum {
         name: Token,
-        variants: Vec<VariantDeclaration>,
+        variants: Vec<VariantDeclaration<'a>>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct ComponentInitializer<'a> {
-    pub component: Type,
-    pub fields: Vec<(Option<Token>, Expression<'a>)>,
+    pub component: Type<'a>,
+    pub fields: Vec<(Option<&'a Token>, Expression<'a>)>,
 }
 
 #[derive(Debug, Clone)]
-pub struct FieldDeclaration {
+pub struct FieldDeclaration<'a> {
     pub is_noinit: bool,
     pub name: Token,
-    pub field_type: Type,
+    pub field_type: Type<'a>,
 }
 
 #[derive(Debug, Clone)]
-pub enum VariantDeclaration {
+pub enum VariantDeclaration<'a> {
     Basic(Token),
-    Tuple(Token, Vec<Type>),
-    Struct(Token, Vec<(Token, Type)>),
+    Tuple(Token, Vec<Type<'a>>),
+    Struct(Token, Vec<(Token, Type<'a>)>),
 }
 
 #[derive(Debug, Clone)]
@@ -134,12 +134,15 @@ impl<'a> Decorator<'a> {
 }
 
 #[derive(Debug, Clone)]
-pub enum Type {
-    Tuple(Vec<Type>),
-    Array(Box<Type>),
-    Map(Box<Type>, Box<Type>),
-    Set(Box<Type>),
-    Entity(Token, Vec<Type>),
+pub enum Type<'a> {
+    Tuple(Vec<Type<'a>>),
+    Array(Box<Type<'a>>, &'a Token), // Token is the size of the array
+    Slice(Box<Type<'a>>),
+    Pointer(Box<Type<'a>>),
+    Option(Box<Type<'a>>),
+    Map(Box<Type<'a>>, Box<Type<'a>>),
+    Set(Box<Type<'a>>),
+    Entity(&'a Token, Vec<Type<'a>>),
 }
 
 #[derive(Debug, Clone)]
@@ -195,7 +198,7 @@ pub enum Expression<'a> {
         name: Token,
         arguments: Vec<Token>,
     },
-    Literal(Token),
+    Literal(&'a Token),
     ArrayLiteral(Vec<Expression<'a>>),
     TupleLiteral(Vec<Expression<'a>>),
     MapLiteral(Vec<(Expression<'a>, Expression<'a>)>),
@@ -203,31 +206,35 @@ pub enum Expression<'a> {
     True,
     False,
     Null,
-    Variable(Token),
-    Temp(Vec<Token>),
+    Variable(&'a Token),
+    Temp(Vec<&'a Token>),
 }
 
 #[derive(Debug, Clone)]
 pub struct MatchArm<'a> {
-    pub pattern: Pattern,
+    pub pattern: Pattern<'a>,
     pub body: Vec<Expression<'a>>,
 }
 
 #[derive(Debug, Clone)]
-pub enum Pattern {
+pub enum Pattern<'a> {
     Wildcard,
     Literal(Token),
     Binding {
         name: Token,
-        pattern: Box<Pattern>,
+        pattern: Box<Pattern<'a>>,
     },
     Enum {
         name: Token,
-        arguments: Vec<Pattern>,
+        arguments: Vec<Pattern<'a>>,
     },
-    Tuple(Vec<Pattern>),
-    Entity(Token, Vec<(Token, Pattern)>),
-    Array(Vec<Pattern>),
-    Map(Vec<(Pattern, Pattern)>),
-    Set(Vec<Pattern>),
+    Tuple(Vec<Pattern<'a>>),
+    Entity(Token, Vec<(Token, Pattern<'a>)>),
+    Array(Vec<Pattern<'a>>),
+    Map(Vec<(Pattern<'a>, Pattern<'a>)>),
+    Set(Vec<Pattern<'a>>),
+    Guarded {
+        pattern: Box<Pattern<'a>>,
+        guard: Box<Expression<'a>>,
+    },
 }
