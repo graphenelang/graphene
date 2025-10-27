@@ -73,7 +73,7 @@ impl<'a> Parser<'a> {
         self.tokens[*current].token_type == TokenType::EOF
     }
 
-    pub fn parse(&self) -> Result<Program, Vec<ParseError>> {
+    pub fn parse(&self) -> Result<Program<'_>, Vec<ParseError>> {
         let mut errors = Vec::new();
         let mut current = 0;
         let program = self.program(&mut current, &mut errors);
@@ -94,7 +94,7 @@ impl<'a> Parser<'a> {
         Ok(program)
     }
 
-    fn program(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Program {
+    fn program(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Program<'_> {
         let mut program = Program::new();
         while !self.is_at_end(current) {
             match self.tokens[*current] {
@@ -117,7 +117,7 @@ impl<'a> Parser<'a> {
                     let pragma = self.pragma(current, errors);
                     if let Ok(pragma) = pragma {
                         program.pragmas.push(pragma);
-                    } else if let Err(err) = pragma {
+                    } else if let Err(_) = pragma {
                         continue;
                     }
                 }
@@ -125,7 +125,7 @@ impl<'a> Parser<'a> {
                     let declaration = self.declaration(current, errors);
                     if let Ok(declaration) = declaration {
                         program.declarations.push(declaration);
-                    } else if let Err(err) = declaration {
+                    } else if let Err(_) = declaration {
                         continue;
                     }
                 }
@@ -135,7 +135,7 @@ impl<'a> Parser<'a> {
         program
     }
 
-    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma, ()> {
+    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected pragma name".to_string(),
@@ -195,7 +195,7 @@ impl<'a> Parser<'a> {
         &self,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<Declaration, ()> {
+    ) -> Result<Declaration<'_>, ()> {
         let current_token = &self.tokens[*current];
         let mut decorators: Vec<Decorator> = Vec::new();
         while current_token.token_type == TokenType::At {
@@ -235,7 +235,7 @@ impl<'a> Parser<'a> {
         &self,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<Decorator, ()> {
+    ) -> Result<Decorator<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected decorator".to_string(),
@@ -294,7 +294,7 @@ impl<'a> Parser<'a> {
         &self,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<EntityDeclaration, ()> {
+    ) -> Result<EntityDeclaration<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected entity name".to_string(),
@@ -346,7 +346,7 @@ impl<'a> Parser<'a> {
         name_index: usize,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<EntityDeclaration, ()> {
+    ) -> Result<EntityDeclaration<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected entity value".to_string(),
@@ -408,7 +408,7 @@ impl<'a> Parser<'a> {
         &self,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<ComponentInitializer, ()> {
+    ) -> Result<ComponentInitializer<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected component initializer".to_string(),
@@ -430,7 +430,7 @@ impl<'a> Parser<'a> {
         &self,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<Type, ()> {
+    ) -> Result<Type<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected type declaration".to_string(),
@@ -648,7 +648,7 @@ impl<'a> Parser<'a> {
         &self,
         current: &mut usize,
         errors: &mut Vec<ParseError>,
-    ) -> Result<Expression, ()> {
+    ) -> Result<Expression<'_>, ()> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected expression".to_string(),
