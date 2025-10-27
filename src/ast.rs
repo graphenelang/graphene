@@ -84,9 +84,16 @@ pub struct Generic<'a> {
 }
 
 #[derive(Debug, Clone)]
+pub enum StorageType {
+    Const,
+    Dyn,
+    Normal,
+}
+
+#[derive(Debug, Clone)]
 pub enum EntityDeclaration<'a> {
     Entity {
-        is_const: bool,
+        storage_type: StorageType,
         name: &'a Token,
         component_initializers: Vec<ComponentInitializer<'a>>,
     },

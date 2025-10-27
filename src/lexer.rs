@@ -162,7 +162,7 @@ impl<'a> Lexer<'a> {
             self.tokens.push(Token::new(
                 TokenType::EOF,
                 "".to_owned(),
-                self.line,
+                self.line - 1,
                 self.column,
             ));
             Ok(&self.tokens)
@@ -317,9 +317,21 @@ impl<'a> Lexer<'a> {
 
     fn operator(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
-        let operator = graphemes[self.column - 2].to_string();
-        if operator == "/" && self.column - 1 < graphemes.len() && graphemes[self.column - 1] == "/"
-        {
+        let mut operator = graphemes[self.column - 2].to_string();
+        if graphemes.len() > self.column - 1 {
+            let mut c = graphemes[self.column - 1].chars().next().unwrap_or('\0');
+
+            while is_operator_char(c) {
+                operator.push_str(graphemes[self.column - 1]);
+                self.column += 1;
+                if self.column - 1 >= graphemes.len() {
+                    break;
+                }
+                c = graphemes[self.column - 1].chars().next().unwrap_or('\0');
+            }
+        }
+
+        if operator == "//" {
             self.comment(graphemes);
             return;
         }

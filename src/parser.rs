@@ -20,7 +20,7 @@ use unicode_segmentation::{Graphemes, UnicodeSegmentation};
 use crate::{
     ast::{
         ComponentInitializer, Declaration, Decorator, EntityDeclaration, Expression, Pragma,
-        Program, Type,
+        Program, StorageType, Type,
     },
     token::{Token, TokenType},
 };
@@ -139,7 +139,7 @@ impl<'a> Parser<'a> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected pragma name".to_string(),
-                self.tokens[*current].value.clone(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
                 self.tokens[*current].line,
                 self.tokens[*current].column,
             ));
@@ -149,7 +149,7 @@ impl<'a> Parser<'a> {
         if self.tokens[*current].token_type != TokenType::Name {
             errors.push(ParseError::new(
                 "expected pragma name".to_string(),
-                self.tokens[*current].value.clone(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
                 self.tokens[*current].line,
                 self.tokens[*current].column,
             ));
@@ -167,7 +167,7 @@ impl<'a> Parser<'a> {
                 if self.is_at_end(current) {
                     errors.push(ParseError::new(
                         "expected closing parenthesis".to_string(),
-                        self.lines[self.tokens[*current].line - 2].clone().collect(),
+                        self.lines[self.tokens[*current].line - 1].clone().collect(),
                         self.tokens[*current].line - 1,
                         self.tokens[*current].column,
                     ));
@@ -208,7 +208,37 @@ impl<'a> Parser<'a> {
             }
         }
         match current_token.token_type {
-            // TODO: add const and dyn support
+            TokenType::Const | TokenType::Dyn => {
+                *current += 1;
+                if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Entity
+                {
+                    errors.push(ParseError::new(
+                        format!("expected \"entity\" folowing \"{}\"", current_token.value),
+                        self.lines[self.tokens[*current].line - 1].clone().collect(),
+                        self.tokens[*current].line,
+                        self.tokens[*current].column,
+                    ));
+                    return Err(());
+                }
+
+                *current += 1; // consume "entity"
+
+                let entity = self.entity_or_component(current, errors);
+                if let Ok(mut entity) = entity {
+                    if current_token.token_type == TokenType::Const {
+                        if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
+                            *storage_type = StorageType::Const;
+                        }
+                    } else if current_token.token_type == TokenType::Dyn {
+                        if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
+                            *storage_type = StorageType::Dyn;
+                        }
+                    }
+                    return Ok(Declaration::Entity(entity));
+                } else {
+                    return Err(());
+                }
+            }
             TokenType::Entity => {
                 *current += 1;
                 let entity = self.entity_or_component(current, errors);
@@ -265,7 +295,7 @@ impl<'a> Parser<'a> {
                 if self.is_at_end(current) {
                     errors.push(ParseError::new(
                         "expected closing parenthesis".to_string(),
-                        self.lines[self.tokens[*current].line - 2].clone().collect(),
+                        self.lines[self.tokens[*current].line - 1].clone().collect(),
                         self.tokens[*current].line - 1,
                         self.tokens[*current].column,
                     ));
@@ -350,7 +380,7 @@ impl<'a> Parser<'a> {
         if self.is_at_end(current) {
             errors.push(ParseError::new(
                 "expected entity value".to_string(),
-                self.lines[self.tokens[*current].line - 2].clone().collect(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
                 self.tokens[*current].line - 1,
                 self.tokens[*current].column,
             ));
@@ -358,7 +388,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut result = EntityDeclaration::Entity {
-            is_const: false,
+            storage_type: StorageType::Normal,
             name: &self.tokens[name_index],
             component_initializers: Vec::new(),
         };
@@ -381,7 +411,7 @@ impl<'a> Parser<'a> {
             if self.is_at_end(current) {
                 errors.push(ParseError::new(
                     "expected closing brace".to_string(),
-                    self.lines[self.tokens[*current].line - 2].clone().collect(),
+                    self.lines[self.tokens[*current].line - 1].clone().collect(),
                     self.tokens[*current].line - 1,
                     self.tokens[*current].column,
                 ));
