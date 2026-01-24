@@ -73,19 +73,48 @@ impl<'a> Parser<'a> {
         self.tokens[*current].token_type == TokenType::EOF
     }
 
+    fn consume(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+        expected: TokenType,
+        message: &str,
+    ) -> Result<&Token, ()> {
+        if self.is_at_end(current) && expected != TokenType::EOF {
+            errors.push(ParseError::new(
+                message.to_string(),
+                self.lines[self.tokens[*current].line - 2].clone().collect(),
+                self.tokens[*current].line,
+                self.tokens[*current].column,
+            ));
+            return Err(());
+        }
+        if self.tokens[*current].token_type != expected {
+            errors.push(ParseError::new(
+                message.to_string(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
+                self.tokens[*current].line,
+                self.tokens[*current].column,
+            ));
+            *current += 1; // consume the token
+            return Err(());
+        } else {
+            *current += 1; // consume the expected token
+            return Ok(&self.tokens[*current - 1]);
+        }
+    }
+
     pub fn parse(&self) -> Result<Program<'_>, Vec<ParseError>> {
         let mut errors = Vec::new();
         let mut current = 0;
         let program = self.program(&mut current, &mut errors);
 
-        if self.tokens[current].token_type != crate::token::TokenType::EOF {
-            errors.push(ParseError::new(
-                "expeced end of file".to_string(),
-                self.lines[self.tokens[current].line - 1].clone().collect(),
-                self.tokens[current].line,
-                self.tokens[current].column,
-            ));
-        }
+        let _ = self.consume(
+            &mut current,
+            &mut errors,
+            TokenType::EOF,
+            "expected end of file",
+        );
 
         if errors.len() > 0 {
             return Err(errors);
@@ -135,28 +164,8 @@ impl<'a> Parser<'a> {
         program
     }
 
-    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected pragma name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
-
-        if self.tokens[*current].token_type != TokenType::Name {
-            errors.push(ParseError::new(
-                "expected pragma name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            *current += 1;
-            return Err(());
-        }
-        let name = &self.tokens[*current];
+    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma, ()> {
+        let name = self.consume(current, errors, TokenType::Name, "expected pragma name")?;
         *current += 1;
 
         let mut arguments = Vec::new();
@@ -266,26 +275,7 @@ impl<'a> Parser<'a> {
         current: &mut usize,
         errors: &mut Vec<ParseError>,
     ) -> Result<Decorator<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected decorator".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
-        let name = &self.tokens[*current];
-        *current += 1;
-        if name.token_type != TokenType::Name {
-            errors.push(ParseError::new(
-                "expected decorator name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
+        let name = self.consume(current, errors, TokenType::Name, "expected decorator name")?;
 
         let mut arguments = Vec::new();
         let mut open_parens = 0;
@@ -325,27 +315,8 @@ impl<'a> Parser<'a> {
         current: &mut usize,
         errors: &mut Vec<ParseError>,
     ) -> Result<EntityDeclaration<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected entity name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
         let name_index = *current;
-        *current += 1;
-
-        if self.tokens[name_index].token_type != TokenType::Name {
-            errors.push(ParseError::new(
-                "expected entity name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
+        let _name = self.consume(current, errors, TokenType::Name, "expected entity name")?;
 
         let current_token = &self.tokens[*current];
         if current_token.token_type == TokenType::Lbrace
@@ -393,19 +364,7 @@ impl<'a> Parser<'a> {
             component_initializers: Vec::new(),
         };
 
-        let current_token = &self.tokens[*current];
-        if current_token.token_type == TokenType::Lbrace {
-            *current += 1;
-        } else {
-            *current += 1;
-            errors.push(ParseError::new(
-                "expected {".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
+        self.consume(current, errors, TokenType::Lbrace, "expected {")?;
 
         while self.tokens[*current].token_type.clone() != TokenType::Rbrace {
             if self.is_at_end(current) {
@@ -670,7 +629,15 @@ impl<'a> Parser<'a> {
                 *current += 1; // consume the closing }
                 return Ok(Type::Map(Box::new(key), Box::new(value)));
             }
-            _ => todo!(),
+            _ => {
+                errors.push(ParseError::new(
+                    "expected type declaration".to_string(),
+                    self.lines[self.tokens[*current].line - 1].clone().collect(),
+                    self.tokens[*current].line,
+                    self.tokens[*current].column,
+                ));
+                return Err(());
+            }
         }
     }
 
