@@ -83,7 +83,7 @@ impl<'a> Parser<'a> {
         if self.is_at_end(current) && expected != TokenType::EOF {
             errors.push(ParseError::new(
                 message.to_string(),
-                self.lines[self.tokens[*current].line - 2].clone().collect(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
                 self.tokens[*current].line,
                 self.tokens[*current].column,
             ));
@@ -166,7 +166,6 @@ impl<'a> Parser<'a> {
 
     fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma, ()> {
         let name = self.consume(current, errors, TokenType::Name, "expected pragma name")?;
-        *current += 1;
 
         let mut arguments = Vec::new();
         let mut open_parens = 0;
@@ -217,7 +216,7 @@ impl<'a> Parser<'a> {
             }
         }
         match current_token.token_type {
-            TokenType::Const | TokenType::Dyn => {
+            TokenType::Const | TokenType::Dyn | TokenType::Mut => {
                 *current += 1;
                 if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Entity
                 {
@@ -241,6 +240,10 @@ impl<'a> Parser<'a> {
                     } else if current_token.token_type == TokenType::Dyn {
                         if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
                             *storage_type = StorageType::Dyn;
+                        }
+                    } else if current_token.token_type == TokenType::Mut {
+                        if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
+                            *storage_type = StorageType::Mut;
                         }
                     }
                     return Ok(Declaration::Entity(entity));
@@ -359,7 +362,7 @@ impl<'a> Parser<'a> {
         }
 
         let mut result = EntityDeclaration::Entity {
-            storage_type: StorageType::Normal,
+            storage_type: StorageType::Immut,
             name: &self.tokens[name_index],
             component_initializers: Vec::new(),
         };

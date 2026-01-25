@@ -87,7 +87,8 @@ pub struct Generic<'a> {
 pub enum StorageType {
     Const,
     Dyn,
-    Normal,
+    Mut,
+    Immut,
 }
 
 #[derive(Debug, Clone)]

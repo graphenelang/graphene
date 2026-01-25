@@ -54,6 +54,7 @@ pub enum TokenType {
     Float,
     Colon,
     Dyn,
+    Mut,
     EOF,
 }
 
