@@ -46,33 +46,36 @@ impl<'a> Pragma<'a> {
 
 #[derive(Debug, Clone)]
 pub enum Declaration<'a> {
-    Entity(EntityDeclaration<'a>),
+    Entity {
+        decorators: Vec<Decorator<'a>>,
+        entity: EntityDeclaration<'a>,
+    },
     System {
         decorators: Vec<Decorator<'a>>,
-        name: Token,
+        name: &'a Token,
         generics: Vec<Generic<'a>>,
         parameters: Vec<(Token, Type<'a>)>,
         body: Vec<Expression<'a>>,
     },
     Function {
         decorators: Vec<Decorator<'a>>,
-        name: Token,
+        name: &'a Token,
         generics: Vec<Generic<'a>>,
-        parameters: Vec<(Token, Type<'a>)>,
+        parameters: Vec<(&'a Token, Type<'a>)>,
         return_type: Type<'a>,
         body: Vec<Expression<'a>>,
     },
     Extern {
-        name: Token,
-        parameters: Vec<(Token, Type<'a>)>,
+        name: &'a Token,
+        parameters: Vec<(&'a Token, Type<'a>)>,
         return_type: Type<'a>,
     },
     Decorator {
-        name: Token,
+        name: &'a Token,
         body: Vec<Expression<'a>>,
     },
     Macro {
-        name: Token,
+        name: &'a Token,
         body: Vec<Expression<'a>>,
     },
 }
@@ -181,40 +184,45 @@ pub enum Expression<'a> {
         else_if: Vec<()>,
         else_body: Option<Vec<Expression<'a>>>,
     },
-    Assignement {
-        lhs: (Option<Box<Expression<'a>>>, Token),
+    Assignment {
+        lhs: Box<Expression<'a>>,
         rhs: Box<Expression<'a>>,
     },
     Infix {
         lhs: Box<Expression<'a>>,
-        operator: Token,
+        operator: &'a Token,
         rhs: Box<Expression<'a>>,
+        suffix: Option<&'a Token>,
     },
     Prefix {
-        operator: Token,
+        operator: &'a Token,
         rhs: Box<Expression<'a>>,
+        suffix: Option<&'a Token>,
     },
+    Reference(Box<Expression<'a>>),
+    Dereference(Box<Expression<'a>>),
     FunctionCall {
-        name: Token,
+        name: &'a Token,
         arguments: Vec<Expression<'a>>,
     },
     MacroCall {
-        name: Token,
-        arguments: Vec<Token>,
+        name: &'a Token,
+        arguments: Vec<&'a Token>,
     },
     Call {
-        name: Token,
-        arguments: Vec<Token>,
+        name: &'a Token,
+        arguments: Vec<&'a Token>,
     },
     Literal(&'a Token),
     ArrayLiteral(Vec<Expression<'a>>),
     TupleLiteral(Vec<Expression<'a>>),
     MapLiteral(Vec<(Expression<'a>, Expression<'a>)>),
     SetLiteral(Vec<Expression<'a>>),
-    True,
-    False,
-    Null,
     Variable(&'a Token),
+    FieldAccess {
+        base: Box<Expression<'a>>,
+        field: &'a Token,
+    },
     Temp(Vec<&'a Token>),
 }
 

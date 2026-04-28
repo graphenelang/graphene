@@ -164,7 +164,7 @@ impl<'a> Parser<'a> {
         program
     }
 
-    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma, ()> {
+    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma<'_>, ()> {
         let name = self.consume(current, errors, TokenType::Name, "expected pragma name")?;
 
         let mut arguments = Vec::new();
@@ -246,7 +246,7 @@ impl<'a> Parser<'a> {
                             *storage_type = StorageType::Mut;
                         }
                     }
-                    return Ok(Declaration::Entity(entity));
+                    return Ok(Declaration::Entity { decorators, entity });
                 } else {
                     return Err(());
                 }
@@ -255,10 +255,18 @@ impl<'a> Parser<'a> {
                 *current += 1;
                 let entity = self.entity_or_component(current, errors);
                 if let Ok(entity) = entity {
-                    return Ok(Declaration::Entity(entity));
+                    return Ok(Declaration::Entity {
+                        decorators: Vec::new(),
+                        entity,
+                    });
                 } else {
                     return Err(());
                 }
+            }
+            TokenType::Fn => {
+                *current += 1;
+                self.function(current, errors, decorators)
+                    .or_else(|err| Err(err))
             }
             _ => {
                 errors.push(ParseError::new(
@@ -388,7 +396,7 @@ impl<'a> Parser<'a> {
                     ..
                 } = &mut result
                 {
-                    component_initializers.push(initializer.clone());
+                    component_initializers.push(initializer);
                 }
             }
         }
@@ -412,10 +420,51 @@ impl<'a> Parser<'a> {
         }
 
         let component = self.type_declaration(current, errors)?;
-        return Ok(ComponentInitializer {
-            component,
-            fields: Vec::new(),
-        });
+
+        let mut fields = Vec::new();
+
+        if self.tokens[*current].token_type == TokenType::Lparen {
+            *current += 1; // consume the opening parenthesis
+            while self.tokens[*current].token_type != TokenType::Rparen {
+                if self.is_at_end(current) {
+                    errors.push(ParseError::new(
+                        "expected closing parenthesis".to_string(),
+                        self.lines[self.tokens[*current].line - 1].clone().collect(),
+                        self.tokens[*current].line,
+                        self.tokens[*current].column,
+                    ));
+                    return Err(());
+                }
+
+                let mut field_name = None;
+
+                if self.tokens[*current].token_type == TokenType::Name {
+                    field_name = Some(&self.tokens[*current]);
+                    *current += 1; // consume the field name
+
+                    self.consume(current, errors, TokenType::Colon, "expected :")?;
+                }
+
+                let value = self.expression(current, errors)?;
+
+                fields.push((field_name, value));
+
+                if self.tokens[*current].token_type == TokenType::Comma {
+                    *current += 1; // consume the comma
+                } else if self.tokens[*current].token_type != TokenType::Rparen {
+                    errors.push(ParseError::new(
+                        "expected , or )".to_string(),
+                        self.lines[self.tokens[*current].line - 1].clone().collect(),
+                        self.tokens[*current].line,
+                        self.tokens[*current].column,
+                    ));
+                    return Err(());
+                }
+            }
+            *current += 1; // consume the closing parenthesis
+        }
+
+        return Ok(ComponentInitializer { component, fields });
     }
 
     fn type_declaration(
@@ -644,6 +693,100 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn function(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+        decorators: Vec<Decorator<'a>>,
+    ) -> Result<Declaration<'_>, ()> {
+        let name = if self.is_at_end(current) {
+            errors.push(ParseError::new(
+                "expected function name".to_string(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
+                self.tokens[*current].line,
+                self.tokens[*current].column,
+            ));
+            return Err(());
+        } else if matches!(
+            self.tokens[*current].token_type,
+            TokenType::Name | TokenType::Operator
+        ) {
+            let n = &self.tokens[*current];
+            *current += 1;
+            n
+        } else {
+            errors.push(ParseError::new(
+                "expected function name".to_string(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
+                self.tokens[*current].line,
+                self.tokens[*current].column,
+            ));
+            *current += 1;
+            return Err(());
+        };
+
+        self.consume(current, errors, TokenType::Lparen, "expected (")?;
+
+        let mut parameters = Vec::new();
+
+        while self.tokens[*current].token_type != TokenType::Rparen {
+            if self.is_at_end(current) {
+                errors.push(ParseError::new(
+                    "expected closing parenthesis".to_string(),
+                    self.lines[self.tokens[*current].line - 1].clone().collect(),
+                    self.tokens[*current].line,
+                    self.tokens[*current].column,
+                ));
+                return Err(());
+            }
+
+            let param_name =
+                self.consume(current, errors, TokenType::Name, "expected parameter name")?;
+            self.consume(current, errors, TokenType::Colon, "expected :")?;
+            let param_type = self.type_declaration(current, errors)?;
+            parameters.push((param_name, param_type));
+            *current += 1;
+        }
+        *current += 1; // consume the closing parenthesis
+
+        let return_type = if self.tokens[*current].token_type == TokenType::Operator
+            && self.tokens[*current].value == "->"
+        {
+            *current += 1; // consume the ->
+            self.type_declaration(current, errors)?
+        } else {
+            Type::Tuple(Vec::new())
+        };
+
+        self.consume(current, errors, TokenType::Lbrace, "expected {")?;
+
+        let mut body = Vec::new();
+
+        while self.tokens[*current].token_type != TokenType::Rbrace {
+            if self.is_at_end(current) {
+                errors.push(ParseError::new(
+                    "expected closing }".to_string(),
+                    self.lines[self.tokens[*current].line - 1].clone().collect(),
+                    self.tokens[*current].line,
+                    self.tokens[*current].column,
+                ));
+                return Err(());
+            }
+            let expr = self.expression(current, errors)?;
+            body.push(expr);
+        }
+        *current += 1; // consume the closing }
+
+        Ok(Declaration::Function {
+            name,
+            decorators,
+            generics: Vec::new(),
+            parameters,
+            return_type,
+            body,
+        })
+    }
+
     fn expression(
         &self,
         current: &mut usize,
@@ -658,8 +801,284 @@ impl<'a> Parser<'a> {
             ));
             return Err(());
         }
-        let expression = &self.tokens[*current];
-        *current += 1;
-        Ok(Expression::Temp(vec![expression]))
+
+        match self.tokens[*current].token_type {
+            TokenType::At
+            | TokenType::Entity
+            | TokenType::Fn
+            | TokenType::Const
+            | TokenType::Mut
+            | TokenType::Extern
+            | TokenType::Enum
+            | TokenType::System
+            | TokenType::Macro => {
+                return Ok(Expression::Declaration(self.declaration(current, errors)?));
+            }
+            _ => self.assignment(current, errors),
+        }
+    }
+
+    fn assignment(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+    ) -> Result<Expression<'_>, ()> {
+        let left = self.operators(current, errors)?;
+
+        if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Equal {
+            return Ok(left);
+        }
+
+        *current += 1; // consume the =
+
+        if let Expression::Variable(..)
+        | Expression::Dereference(..)
+        | Expression::FieldAccess { .. } = left
+        {
+            let right = self.assignment(current, errors)?;
+
+            return Ok(Expression::Assignment {
+                lhs: Box::new(left),
+                rhs: Box::new(right),
+            });
+        } else {
+            errors.push(ParseError::new(
+                "invalid assignment target".to_string(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
+                self.tokens[*current].line,
+                self.tokens[*current].column,
+            ));
+            return Err(());
+        }
+    }
+
+    fn is_atom_start(&self, idx: usize) -> bool {
+        idx < self.tokens.len()
+            && matches!(
+                self.tokens[idx].token_type,
+                TokenType::Integer
+                    | TokenType::Float
+                    | TokenType::String
+                    | TokenType::Char
+                    | TokenType::True
+                    | TokenType::False
+                    | TokenType::Null
+                    | TokenType::Name
+                    | TokenType::Lparen
+            )
+    }
+
+    fn next_is_operator(&self, idx: usize) -> bool {
+        idx < self.tokens.len() && self.tokens[idx].token_type == TokenType::Operator
+    }
+
+    fn unary(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+    ) -> Result<Expression<'_>, ()> {
+        if !self.is_at_end(current) && self.tokens[*current].token_type == TokenType::Operator {
+            let op = &self.tokens[*current];
+            *current += 1;
+            let rhs = Box::new(self.unary(current, errors)?);
+
+            let suffix = if !self.is_at_end(current)
+                && self.tokens[*current].token_type == TokenType::Operator
+                && self.next_is_operator(*current + 1)
+            {
+                let s = &self.tokens[*current];
+                *current += 1;
+                Some(s)
+            } else {
+                None
+            };
+
+            return Ok(if suffix.is_none() && op.value == "&" {
+                Expression::Reference(rhs)
+            } else if suffix.is_none() && op.value == "*" {
+                Expression::Dereference(rhs)
+            } else {
+                Expression::Prefix {
+                    operator: op,
+                    rhs,
+                    suffix,
+                }
+            });
+        }
+        self.call(current, errors)
+    }
+
+    fn operators(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+    ) -> Result<Expression<'_>, ()> {
+        let mut left = self.unary(current, errors)?;
+
+        loop {
+            if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Operator {
+                break;
+            }
+
+            let op_pos = *current;
+            let op_token = &self.tokens[op_pos];
+
+            *current += 1;
+            let rhs = self.unary(current, errors)?;
+
+            let suffix = if !self.is_at_end(current)
+                && self.tokens[*current].token_type == TokenType::Operator
+                && !self.is_atom_start(*current + 1)
+            {
+                let s = &self.tokens[*current];
+                *current += 1;
+                Some(s)
+            } else {
+                None
+            };
+
+            if !self.is_at_end(current) && self.tokens[*current].token_type == TokenType::Equal {
+                match &mut left {
+                    Expression::Infix { suffix: s, .. } | Expression::Prefix { suffix: s, .. }
+                        if s.is_none() =>
+                    {
+                        *s = Some(op_token);
+                    }
+                    _ => {}
+                }
+                *current = op_pos + 1;
+                break;
+            }
+
+            left = Expression::Infix {
+                lhs: Box::new(left),
+                operator: op_token,
+                rhs: Box::new(rhs),
+                suffix,
+            };
+        }
+
+        Ok(left)
+    }
+
+    fn call(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+    ) -> Result<Expression<'_>, ()> {
+        let mut expr = self.primary(current, errors)?;
+
+        loop {
+            if self.tokens[*current].token_type == TokenType::Lparen {
+                *current += 1; // consume the opening parenthesis
+                let mut arguments = Vec::new();
+                while self.tokens[*current].token_type != TokenType::Rparen {
+                    if self.is_at_end(current) {
+                        errors.push(ParseError::new(
+                            "expected closing parenthesis".to_string(),
+                            self.lines[self.tokens[*current].line - 1].clone().collect(),
+                            self.tokens[*current].line,
+                            self.tokens[*current].column,
+                        ));
+                        return Err(());
+                    }
+                    let argument = self.expression(current, errors)?;
+                    arguments.push(argument);
+                    if self.tokens[*current].token_type == TokenType::Comma {
+                        *current += 1; // consume the comma
+                    } else if self.tokens[*current].token_type != TokenType::Rparen {
+                        errors.push(ParseError::new(
+                            "expected , or )".to_string(),
+                            self.lines[self.tokens[*current].line - 1].clone().collect(),
+                            self.tokens[*current].line,
+                            self.tokens[*current].column,
+                        ));
+                        return Err(());
+                    }
+                }
+                *current += 1; // consume the closing parenthesis
+                expr = Expression::FunctionCall {
+                    name: match expr {
+                        Expression::Variable(name) => name,
+                        _ => {
+                            errors.push(ParseError::new(
+                                "expected function name".to_string(),
+                                self.lines[self.tokens[*current].line - 1].clone().collect(),
+                                self.tokens[*current].line,
+                                self.tokens[*current].column,
+                            ));
+                            return Err(());
+                        }
+                    },
+                    arguments,
+                };
+            } else if self.tokens[*current].token_type == TokenType::Dot {
+                *current += 1; // consume the dot
+                let field =
+                    self.consume(current, errors, TokenType::Name, "expected field name")?;
+                expr = Expression::FieldAccess {
+                    base: Box::new(expr),
+                    field,
+                };
+            } else {
+                break;
+            }
+        }
+
+        Ok(expr)
+    }
+
+    fn primary(
+        &self,
+        current: &mut usize,
+        errors: &mut Vec<ParseError>,
+    ) -> Result<Expression<'_>, ()> {
+        if self.is_at_end(current) {
+            errors.push(ParseError::new(
+                "expected expression".to_string(),
+                self.lines[self.tokens[*current].line - 1].clone().collect(),
+                self.tokens[*current].line,
+                self.tokens[*current].column,
+            ));
+            return Err(());
+        }
+
+        let token = &self.tokens[*current];
+        match token.token_type {
+            TokenType::Integer
+            | TokenType::Float
+            | TokenType::String
+            | TokenType::Char
+            | TokenType::True
+            | TokenType::False
+            | TokenType::Null => {
+                *current += 1;
+                Ok(Expression::Literal(token))
+            }
+            TokenType::Name => {
+                *current += 1;
+                Ok(Expression::Variable(token))
+            }
+            TokenType::Lparen => {
+                *current += 1; // consume the opening parenthesis
+                let expr = self.expression(current, errors)?;
+                self.consume(
+                    current,
+                    errors,
+                    TokenType::Rparen,
+                    "expected closing parenthesis",
+                )?;
+                Ok(expr)
+            }
+            _ => {
+                errors.push(ParseError::new(
+                    "expected expression".to_string(),
+                    self.lines[self.tokens[*current].line - 1].clone().collect(),
+                    self.tokens[*current].line,
+                    self.tokens[*current].column,
+                ));
+                return Err(());
+            }
+        }
     }
 }
