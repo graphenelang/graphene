@@ -15,8 +15,6 @@
 // You should have received a copy of the GNU General Public License
 // along with graphene.  If not, see <https://www.gnu.org/licenses/>.
 
-use unicode_segmentation::{Graphemes, UnicodeSegmentation};
-
 use crate::{
     ast::{
         ComponentInitializer, Declaration, Decorator, EntityDeclaration, Expression, Pragma,
@@ -56,29 +54,69 @@ impl std::fmt::Display for ParseError {
 }
 
 pub struct Parser<'a> {
-    tokens: &'a Vec<Token>,
-    lines: Vec<Graphemes<'a>>,
+    /// Always ends with an EOF token, which `current` never moves past.
+    tokens: &'a [Token],
+    lines: Vec<&'a str>,
+    current: usize,
+    errors: Vec<ParseError>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(source: &'a str, tokens: &'a Vec<Token>) -> Self {
-        let lines = source
-            .split('\n')
-            .map(|line| line.graphemes(true))
-            .collect();
-        Parser { tokens, lines }
+    pub fn new(source: &'a str, tokens: &'a [Token]) -> Self {
+        Parser {
+            tokens,
+            lines: source.split('\n').collect(),
+            current: 0,
+            errors: Vec::new(),
+        }
     }
 
-    fn is_at_end(&self, current: &usize) -> bool {
-        self.tokens[*current].token_type == TokenType::EOF
+    // ---- token cursor ----
+
+    /// The current token, or `None` at end of input.
+    fn peek(&self) -> Option<&'a Token> {
+        self.tokens
+            .get(self.current)
+            .filter(|t| t.token_type != TokenType::EOF)
     }
 
-    /// True if the tokens at `idx` and `idx + 1` are the single-grapheme
-    /// symbols `first` and `second` with nothing between them, e.g. `->` or `@@`.
+    /// The token after the current one, or `None` if that is end of input.
+    fn peek_next(&self) -> Option<&'a Token> {
+        self.peek()?;
+        self.tokens
+            .get(self.current + 1)
+            .filter(|t| t.token_type != TokenType::EOF)
+    }
+
+    /// Consumes and returns the current token, or returns `None` at end of input.
+    fn next(&mut self) -> Option<&'a Token> {
+        let token = self.peek()?;
+        self.current += 1;
+        Some(token)
+    }
+
+    /// The current token, including EOF. Used for error positions.
+    fn current_token(&self) -> &'a Token {
+        &self.tokens[self.current]
+    }
+
+    /// True if the current token has type `token_type`.
+    fn check(&self, token_type: TokenType) -> bool {
+        self.peek().is_some_and(|t| t.token_type == token_type)
+    }
+
+    /// True if the current token is the operator `value`.
+    fn check_op(&self, value: &str) -> bool {
+        self.peek()
+            .is_some_and(|t| t.token_type == TokenType::Operator && t.value == value)
+    }
+
+    /// True if the current and next tokens are the single-grapheme symbols
+    /// `first` and `second` with nothing between them, e.g. `->` or `@@`.
     /// Symbol tokens are always one grapheme wide, so touching means the second
     /// starts on the same line one column after the first.
-    fn is_joined(&self, idx: usize, first: &str, second: &str) -> bool {
-        let (Some(a), Some(b)) = (self.tokens.get(idx), self.tokens.get(idx + 1)) else {
+    fn is_joined(&self, first: &str, second: &str) -> bool {
+        let (Some(a), Some(b)) = (self.peek(), self.peek_next()) else {
             return false;
         };
         let is_symbol = |t: &Token| {
@@ -100,85 +138,94 @@ impl<'a> Parser<'a> {
             && b.column == a.column + 1
     }
 
-    fn consume(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-        expected: TokenType,
-        message: &str,
-    ) -> Result<&Token, ()> {
-        if self.is_at_end(current) && expected != TokenType::EOF {
-            errors.push(ParseError::new(
-                message.to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
+    // ---- error helpers ----
+
+    /// Records an error at the current token.
+    fn error(&mut self, message: impl Into<String>) {
+        let token = self.current_token();
+        self.errors.push(ParseError::new(
+            message.into(),
+            self.lines[token.line - 1].to_owned(),
+            token.line,
+            token.column,
+        ));
+    }
+
+    /// Like `peek`, but records `message` and fails at end of input.
+    fn peek_or_error(&mut self, message: &str) -> Result<&'a Token, ()> {
+        match self.peek() {
+            Some(token) => Ok(token),
+            None => {
+                self.error(message);
+                Err(())
+            }
         }
-        if self.tokens[*current].token_type != expected {
-            errors.push(ParseError::new(
-                message.to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            *current += 1; // consume the token
-            return Err(());
+    }
+
+    /// Consumes the current token if it has type `expected`. Otherwise records
+    /// `message` and skips the token.
+    fn consume(&mut self, expected: TokenType, message: &str) -> Result<&'a Token, ()> {
+        match self.peek() {
+            Some(token) if token.token_type == expected => {
+                self.next();
+                Ok(token)
+            }
+            _ => {
+                self.error(message);
+                self.next();
+                Err(())
+            }
+        }
+    }
+
+    /// After a list element: consumes a `,`, or records `message` unless the
+    /// current token is `close`.
+    fn comma_or(&mut self, close: TokenType, message: &str) -> Result<(), ()> {
+        if self.check(TokenType::Comma) {
+            self.next();
+            Ok(())
+        } else if self.check(close) {
+            Ok(())
         } else {
-            *current += 1; // consume the expected token
-            return Ok(&self.tokens[*current - 1]);
+            self.error(message);
+            Err(())
         }
     }
 
-    pub fn parse(&self) -> Result<Program<'_>, Vec<ParseError>> {
-        let mut errors = Vec::new();
-        let mut current = 0;
-        let program = self.program(&mut current, &mut errors);
+    // ---- grammar ----
 
-        let _ = self.consume(
-            &mut current,
-            &mut errors,
-            TokenType::EOF,
-            "expected end of file",
-        );
+    pub fn parse(mut self) -> Result<Program<'a>, Vec<ParseError>> {
+        let program = self.program();
 
-        if errors.len() > 0 {
-            return Err(errors);
+        if self.peek().is_some() {
+            self.error("expected end of file");
         }
 
-        Ok(program)
+        if self.errors.is_empty() {
+            Ok(program)
+        } else {
+            Err(self.errors)
+        }
     }
 
-    fn program(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Program<'_> {
+    fn program(&mut self) -> Program<'a> {
         let mut program = Program::new();
-        while !self.is_at_end(current) {
-            match self.tokens[*current].token_type {
+        while let Some(token) = self.peek() {
+            match token.token_type {
                 TokenType::Operator => {
-                    errors.push(ParseError::new(
-                        "expected pragma or declaration".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    *current += 1;
-                    continue;
+                    self.error("expected pragma or declaration");
+                    self.next();
                 }
-                TokenType::At if self.is_joined(*current, "@", "@") => {
-                    *current += 2; // consume "@@"
-                    let pragma = self.pragma(current, errors);
-                    if let Ok(pragma) = pragma {
+                TokenType::At if self.is_joined("@", "@") => {
+                    self.next();
+                    self.next(); // consume "@@"
+                    if let Ok(pragma) = self.pragma() {
                         program.pragmas.push(pragma);
-                    } else if let Err(_) = pragma {
-                        continue;
                     }
                 }
                 _ => {
-                    let declaration = self.declaration(current, errors);
-                    if let Ok(declaration) = declaration {
+                    if let Ok(declaration) = self.declaration() {
                         program.declarations.push(declaration);
-                    } else if let Err(_) = declaration {
-                        continue;
                     }
                 }
             }
@@ -187,616 +234,302 @@ impl<'a> Parser<'a> {
         program
     }
 
-    fn pragma(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Result<Pragma<'_>, ()> {
-        let name = self.consume(current, errors, TokenType::Name, "expected pragma name")?;
-
-        let mut arguments = Vec::new();
-        let mut open_parens = 0;
-        if self.tokens[*current].token_type == TokenType::Lparen {
-            *current += 1;
-            loop {
-                if self.is_at_end(current) {
-                    errors.push(ParseError::new(
-                        "expected closing parenthesis".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line - 1,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                if self.tokens[*current].token_type == TokenType::Lparen {
-                    open_parens += 1;
-                } else if self.tokens[*current].token_type == TokenType::Rparen {
-                    if open_parens == 0 {
-                        break;
-                    }
-                    open_parens -= 1;
-                }
-                arguments.push(&self.tokens[*current]);
-                *current += 1;
-            }
-            if !self.is_at_end(current) {
-                *current += 1; // consume the closing parenthesis
-            }
-        }
+    fn pragma(&mut self) -> Result<Pragma<'a>, ()> {
+        let name = self.consume(TokenType::Name, "expected pragma name")?;
+        let arguments = self.raw_arguments()?;
         Ok(Pragma::new(name, arguments))
     }
 
-    fn declaration(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Declaration<'_>, ()> {
-        let current_token = &self.tokens[*current];
-        let mut decorators: Vec<Decorator> = Vec::new();
-        while current_token.token_type == TokenType::At {
-            *current += 1;
-            let decorator = self.decorator(current, errors);
-            if let Ok(decorator) = decorator {
-                decorators.push(decorator);
-            } else {
-                return Err(());
-            }
-        }
-        match current_token.token_type {
-            TokenType::Const | TokenType::Dyn | TokenType::Mut => {
-                *current += 1;
-                if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Entity
-                {
-                    errors.push(ParseError::new(
-                        format!("expected \"entity\" folowing \"{}\"", current_token.value),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-
-                *current += 1; // consume "entity"
-
-                let entity = self.entity_or_component(current, errors);
-                if let Ok(mut entity) = entity {
-                    if current_token.token_type == TokenType::Const {
-                        if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
-                            *storage_type = StorageType::Const;
-                        }
-                    } else if current_token.token_type == TokenType::Dyn {
-                        if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
-                            *storage_type = StorageType::Dyn;
-                        }
-                    } else if current_token.token_type == TokenType::Mut {
-                        if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
-                            *storage_type = StorageType::Mut;
-                        }
-                    }
-                    return Ok(Declaration::Entity { decorators, entity });
-                } else {
-                    return Err(());
-                }
-            }
-            TokenType::Entity => {
-                *current += 1;
-                let entity = self.entity_or_component(current, errors);
-                if let Ok(entity) = entity {
-                    return Ok(Declaration::Entity {
-                        decorators: Vec::new(),
-                        entity,
-                    });
-                } else {
-                    return Err(());
-                }
-            }
-            TokenType::Fn => {
-                *current += 1;
-                self.function(current, errors, decorators)
-                    .or_else(|err| Err(err))
-            }
-            _ => {
-                errors.push(ParseError::new(
-                    "expected decorator or declaration".to_string(),
-                    self.lines[self.tokens[*current].line - 1].clone().collect(),
-                    self.tokens[*current].line,
-                    self.tokens[*current].column,
-                ));
-                *current += 1;
-                return Err(());
-            }
-        }
-    }
-
-    fn decorator(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Decorator<'_>, ()> {
-        let name = self.consume(current, errors, TokenType::Name, "expected decorator name")?;
-
-        let mut arguments = Vec::new();
-        let mut open_parens = 0;
-        if self.tokens[*current].token_type == TokenType::Lparen {
-            *current += 1;
-            loop {
-                if self.is_at_end(current) {
-                    errors.push(ParseError::new(
-                        "expected closing parenthesis".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line - 1,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                if self.tokens[*current].token_type == TokenType::Lparen {
-                    open_parens += 1;
-                } else if self.tokens[*current].token_type == TokenType::Rparen {
-                    if open_parens == 0 {
-                        break;
-                    }
-                    open_parens -= 1;
-                }
-                arguments.push(&self.tokens[*current]);
-                *current += 1;
-            }
-            if !self.is_at_end(current) {
-                *current += 1; // consume the closing parenthesis
-            }
-        }
-
+    fn decorator(&mut self) -> Result<Decorator<'a>, ()> {
+        let name = self.consume(TokenType::Name, "expected decorator name")?;
+        let arguments = self.raw_arguments()?;
         Ok(Decorator::new(name, arguments))
     }
 
-    fn entity_or_component(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<EntityDeclaration<'_>, ()> {
-        let name_index = *current;
-        let _name = self.consume(current, errors, TokenType::Name, "expected entity name")?;
-
-        let current_token = &self.tokens[*current];
-        if current_token.token_type == TokenType::Lbrace
-            || (current_token.token_type == TokenType::Operator && current_token.value == "<")
-        {
-            todo!("component");
-        } else if current_token.token_type == TokenType::Equal {
-            *current += 1;
-            let entity = self.entity(name_index, current, errors);
-            if let Ok(entity) = entity {
-                return Ok(entity);
-            } else {
-                return Err(());
-            }
-        } else {
-            errors.push(ParseError::new(
-                "expected {, <, or =".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
+    /// An optional parenthesised argument list for a pragma or decorator,
+    /// returned as raw tokens. Nested parentheses are kept.
+    fn raw_arguments(&mut self) -> Result<Vec<&'a Token>, ()> {
+        let mut arguments = Vec::new();
+        if !self.check(TokenType::Lparen) {
+            return Ok(arguments);
         }
+        self.next(); // consume the opening parenthesis
+
+        let mut open_parens = 0;
+        loop {
+            let token = self.peek_or_error("expected closing parenthesis")?;
+            match token.token_type {
+                TokenType::Lparen => open_parens += 1,
+                TokenType::Rparen if open_parens == 0 => break,
+                TokenType::Rparen => open_parens -= 1,
+                _ => {}
+            }
+            arguments.push(token);
+            self.next();
+        }
+        self.next(); // consume the closing parenthesis
+
+        Ok(arguments)
     }
 
-    fn entity(
-        &self,
-        name_index: usize,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<EntityDeclaration<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected entity value".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line - 1,
-                self.tokens[*current].column,
-            ));
-            return Err(());
+    fn declaration(&mut self) -> Result<Declaration<'a>, ()> {
+        let current_token = self.current_token();
+        let mut decorators = Vec::new();
+        while current_token.token_type == TokenType::At {
+            self.next();
+            decorators.push(self.decorator()?);
         }
-
-        let mut result = EntityDeclaration::Entity {
-            storage_type: StorageType::Immut,
-            name: &self.tokens[name_index],
-            component_initializers: Vec::new(),
-        };
-
-        self.consume(current, errors, TokenType::Lbrace, "expected {")?;
-
-        while self.tokens[*current].token_type.clone() != TokenType::Rbrace {
-            if self.is_at_end(current) {
-                errors.push(ParseError::new(
-                    "expected closing brace".to_string(),
-                    self.lines[self.tokens[*current].line - 1].clone().collect(),
-                    self.tokens[*current].line - 1,
-                    self.tokens[*current].column,
-                ));
-                return Err(());
-            }
-            let initializer = self.component_initializer(current, errors);
-            if let Err(_) = initializer {
-                return Err(());
-            } else if let Ok(initializer) = initializer {
-                if let EntityDeclaration::Entity {
-                    component_initializers,
-                    ..
-                } = &mut result
-                {
-                    component_initializers.push(initializer);
-                }
-            }
-        }
-        *current += 1; // consume the closing brace
-        return Ok(result);
-    }
-
-    fn component_initializer(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<ComponentInitializer<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected component initializer".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
-
-        let component = self.type_declaration(current, errors)?;
-
-        let mut fields = Vec::new();
-
-        if self.tokens[*current].token_type == TokenType::Lparen {
-            *current += 1; // consume the opening parenthesis
-            while self.tokens[*current].token_type != TokenType::Rparen {
-                if self.is_at_end(current) {
-                    errors.push(ParseError::new(
-                        "expected closing parenthesis".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-
-                let mut field_name = None;
-
-                if self.tokens[*current].token_type == TokenType::Name {
-                    field_name = Some(&self.tokens[*current]);
-                    *current += 1; // consume the field name
-
-                    self.consume(current, errors, TokenType::Colon, "expected :")?;
-                }
-
-                let value = self.expression(current, errors)?;
-
-                fields.push((field_name, value));
-
-                if self.tokens[*current].token_type == TokenType::Comma {
-                    *current += 1; // consume the comma
-                } else if self.tokens[*current].token_type != TokenType::Rparen {
-                    errors.push(ParseError::new(
-                        "expected , or )".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-            }
-            *current += 1; // consume the closing parenthesis
-        }
-
-        return Ok(ComponentInitializer { component, fields });
-    }
-
-    fn type_declaration(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Type<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected type declaration".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
-
-        let current_token = &self.tokens[*current];
         match current_token.token_type {
-            TokenType::Lparen => {
-                *current += 1;
-                let mut types = Vec::new();
-                while self.tokens[*current].token_type != TokenType::Rparen {
-                    if self.is_at_end(current) {
-                        errors.push(ParseError::new(
-                            "expected closing parenthesis".to_string(),
-                            self.lines[self.tokens[*current].line - 1].clone().collect(),
-                            self.tokens[*current].line,
-                            self.tokens[*current].column,
-                        ));
-                        return Err(());
-                    }
-                    let type_decl = self.type_declaration(current, errors)?;
-                    types.push(type_decl);
-
-                    if self.tokens[*current].token_type == TokenType::Comma {
-                        *current += 1; // consume the comma
-                    } else if self.tokens[*current].token_type != TokenType::Rparen {
-                        errors.push(ParseError::new(
-                            "expected , or )".to_string(),
-                            self.lines[self.tokens[*current].line - 1].clone().collect(),
-                            self.tokens[*current].line,
-                            self.tokens[*current].column,
-                        ));
-                        return Err(());
-                    }
+            TokenType::Const | TokenType::Dyn | TokenType::Mut => {
+                let storage = match current_token.token_type {
+                    TokenType::Const => StorageType::Const,
+                    TokenType::Dyn => StorageType::Dyn,
+                    _ => StorageType::Mut,
+                };
+                self.next();
+                if !self.check(TokenType::Entity) {
+                    self.error(format!(
+                        "expected \"entity\" folowing \"{}\"",
+                        current_token.value
+                    ));
+                    return Err(());
                 }
-                *current += 1; // consume the closing parenthesis
-                return Ok(Type::Tuple(types));
+                self.next(); // consume "entity"
+
+                let mut entity = self.entity_or_component()?;
+                if let EntityDeclaration::Entity { storage_type, .. } = &mut entity {
+                    *storage_type = storage;
+                }
+                Ok(Declaration::Entity { decorators, entity })
             }
-            TokenType::Operator if current_token.value == "[" => {
-                *current += 1;
-                let type_decl = self.type_declaration(current, errors)?;
-                if self.tokens[*current].value != ";" {
-                    if self.tokens[*current].token_type == TokenType::Operator
-                        && self.tokens[*current].value == "]"
-                    {
-                        *current += 1;
-                        return Ok(Type::Slice(Box::new(type_decl)));
-                    }
-                    errors.push(ParseError::new(
-                        "expected ; or ]".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-
-                *current += 1; // consume the semicolon
-                if self.is_at_end(current) {
-                    errors.push(ParseError::new(
-                        "expected array length".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-
-                let array_length = &self.tokens[*current];
-                if self.tokens[*current].token_type != TokenType::Integer
-                    && self.tokens[*current].token_type != TokenType::Name
-                {
-                    errors.push(ParseError::new(
-                        "expected array length".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-
-                *current += 1;
-
-                if self.tokens[*current].token_type != TokenType::Operator
-                    || self.tokens[*current].value != "]"
-                {
-                    errors.push(ParseError::new(
-                        "expected ]".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                *current += 1; // consume the closing bracket
-                return Ok(Type::Array(Box::new(type_decl), array_length));
+            TokenType::Entity => {
+                self.next();
+                let entity = self.entity_or_component()?;
+                Ok(Declaration::Entity {
+                    decorators: Vec::new(),
+                    entity,
+                })
             }
-            TokenType::Name => {
-                let name = &self.tokens[*current];
-                *current += 1;
-                let mut generics = Vec::new();
-                if !self.is_at_end(current)
-                    && self.tokens[*current].token_type == TokenType::Operator
-                    && self.tokens[*current].value == "<"
-                {
-                    *current += 1; // consume the <
-                    while self.tokens[*current].token_type != TokenType::Operator
-                        && self.tokens[*current].value != ">"
-                    {
-                        if self.is_at_end(current) {
-                            errors.push(ParseError::new(
-                                "expected closing >".to_string(),
-                                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                                self.tokens[*current].line,
-                                self.tokens[*current].column,
-                            ));
-                            return Err(());
-                        }
-                        let generic = self.type_declaration(current, errors)?;
-                        generics.push(generic);
-                        if !self.is_at_end(current)
-                            && self.tokens[*current].token_type == TokenType::Comma
-                        {
-                            *current += 1; // consume the ,
-                        } else if self.tokens[*current].token_type != TokenType::Operator
-                            && self.tokens[*current].value != ">"
-                        {
-                            errors.push(ParseError::new(
-                                "expected , or >".to_string(),
-                                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                                self.tokens[*current].line,
-                                self.tokens[*current].column,
-                            ));
-                            return Err(());
-                        }
-                    }
-                    *current += 1; // consume the >
-                }
-
-                return Ok(Type::Entity(name, generics));
-            }
-            TokenType::Operator if current_token.value == "*" => {
-                *current += 1; // consume the *
-                return Ok(Type::Pointer(Box::new(
-                    self.type_declaration(current, errors)?,
-                )));
-            }
-            TokenType::Operator if current_token.value == "?" => {
-                *current += 1; // consume the ?
-                return Ok(Type::Option(Box::new(
-                    self.type_declaration(current, errors)?,
-                )));
-            }
-            TokenType::Lbrace => {
-                *current += 1; // consume the {
-                let key = self.type_declaration(current, errors)?;
-                if self.is_at_end(current) {
-                    errors.push(ParseError::new(
-                        "expected : or }".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                if self.tokens[*current].token_type == TokenType::Rbrace {
-                    *current += 1;
-                    return Ok(Type::Set(Box::new(key)));
-                } else if self.tokens[*current].token_type == TokenType::Colon
-                    && self.tokens[*current].value == ":"
-                {
-                    *current += 1; // consume the :
-                } else {
-                    errors.push(ParseError::new(
-                        "expected : or }".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                if self.is_at_end(current) {
-                    errors.push(ParseError::new(
-                        "expected value type".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                let value = self.type_declaration(current, errors)?;
-                if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Rbrace
-                {
-                    errors.push(ParseError::new(
-                        "expected closing }".to_string(),
-                        self.lines[self.tokens[*current].line - 1].clone().collect(),
-                        self.tokens[*current].line,
-                        self.tokens[*current].column,
-                    ));
-                    return Err(());
-                }
-                *current += 1; // consume the closing }
-                return Ok(Type::Map(Box::new(key), Box::new(value)));
+            TokenType::Fn => {
+                self.next();
+                self.function(decorators)
             }
             _ => {
-                errors.push(ParseError::new(
-                    "expected type declaration".to_string(),
-                    self.lines[self.tokens[*current].line - 1].clone().collect(),
-                    self.tokens[*current].line,
-                    self.tokens[*current].column,
-                ));
-                return Err(());
+                self.error("expected decorator or declaration");
+                self.next();
+                Err(())
             }
         }
     }
 
-    fn function(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-        decorators: Vec<Decorator<'a>>,
-    ) -> Result<Declaration<'_>, ()> {
-        let name = if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected function name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        } else if matches!(
-            self.tokens[*current].token_type,
-            TokenType::Name | TokenType::Operator
-        ) {
-            let n = &self.tokens[*current];
-            *current += 1;
-            n
-        } else {
-            errors.push(ParseError::new(
-                "expected function name".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            *current += 1;
-            return Err(());
-        };
+    fn entity_or_component(&mut self) -> Result<EntityDeclaration<'a>, ()> {
+        let name = self.consume(TokenType::Name, "expected entity name")?;
 
-        self.consume(current, errors, TokenType::Lparen, "expected (")?;
+        if self.check(TokenType::Lbrace) || self.check_op("<") {
+            todo!("component");
+        } else if self.check(TokenType::Equal) {
+            self.next();
+            self.entity(name)
+        } else {
+            self.error("expected {, <, or =");
+            Err(())
+        }
+    }
+
+    fn entity(&mut self, name: &'a Token) -> Result<EntityDeclaration<'a>, ()> {
+        self.peek_or_error("expected entity value")?;
+        self.consume(TokenType::Lbrace, "expected {")?;
+
+        let mut component_initializers = Vec::new();
+        while !self.check(TokenType::Rbrace) {
+            self.peek_or_error("expected closing brace")?;
+            component_initializers.push(self.component_initializer()?);
+        }
+        self.next(); // consume the closing brace
+
+        Ok(EntityDeclaration::Entity {
+            storage_type: StorageType::Immut,
+            name,
+            component_initializers,
+        })
+    }
+
+    fn component_initializer(&mut self) -> Result<ComponentInitializer<'a>, ()> {
+        self.peek_or_error("expected component initializer")?;
+        let component = self.type_declaration()?;
+
+        let mut fields = Vec::new();
+        if self.check(TokenType::Lparen) {
+            self.next(); // consume the opening parenthesis
+            while !self.check(TokenType::Rparen) {
+                let token = self.peek_or_error("expected closing parenthesis")?;
+
+                let mut field_name = None;
+                if token.token_type == TokenType::Name {
+                    field_name = Some(token);
+                    self.next(); // consume the field name
+                    self.consume(TokenType::Colon, "expected :")?;
+                }
+
+                let value = self.expression()?;
+                fields.push((field_name, value));
+
+                self.comma_or(TokenType::Rparen, "expected , or )")?;
+            }
+            self.next(); // consume the closing parenthesis
+        }
+
+        Ok(ComponentInitializer { component, fields })
+    }
+
+    fn type_declaration(&mut self) -> Result<Type<'a>, ()> {
+        let current_token = self.peek_or_error("expected type declaration")?;
+        match current_token.token_type {
+            TokenType::Lparen => {
+                self.next();
+                let mut types = Vec::new();
+                while !self.check(TokenType::Rparen) {
+                    self.peek_or_error("expected closing parenthesis")?;
+                    types.push(self.type_declaration()?);
+                    self.comma_or(TokenType::Rparen, "expected , or )")?;
+                }
+                self.next(); // consume the closing parenthesis
+                Ok(Type::Tuple(types))
+            }
+            TokenType::Operator if current_token.value == "[" => {
+                self.next();
+                let type_decl = self.type_declaration()?;
+                if !self.check_op(";") {
+                    if self.check_op("]") {
+                        self.next();
+                        return Ok(Type::Slice(Box::new(type_decl)));
+                    }
+                    self.error("expected ; or ]");
+                    return Err(());
+                }
+                self.next(); // consume the semicolon
+
+                let array_length = self.peek_or_error("expected array length")?;
+                if !matches!(
+                    array_length.token_type,
+                    TokenType::Integer | TokenType::Name
+                ) {
+                    self.error("expected array length");
+                    return Err(());
+                }
+                self.next();
+
+                if !self.check_op("]") {
+                    self.error("expected ]");
+                    return Err(());
+                }
+                self.next(); // consume the closing bracket
+                Ok(Type::Array(Box::new(type_decl), array_length))
+            }
+            TokenType::Name => {
+                self.next();
+                let mut generics = Vec::new();
+                if self.check_op("<") {
+                    self.next(); // consume the <
+                    while self.current_token().token_type != TokenType::Operator
+                        && self.current_token().value != ">"
+                    {
+                        self.peek_or_error("expected closing >")?;
+                        generics.push(self.type_declaration()?);
+                        if self.check(TokenType::Comma) {
+                            self.next(); // consume the ,
+                        } else if self.current_token().token_type != TokenType::Operator
+                            && self.current_token().value != ">"
+                        {
+                            self.error("expected , or >");
+                            return Err(());
+                        }
+                    }
+                    self.next(); // consume the >
+                }
+
+                Ok(Type::Entity(current_token, generics))
+            }
+            TokenType::Operator if current_token.value == "*" => {
+                self.next(); // consume the *
+                Ok(Type::Pointer(Box::new(self.type_declaration()?)))
+            }
+            TokenType::Operator if current_token.value == "?" => {
+                self.next(); // consume the ?
+                Ok(Type::Option(Box::new(self.type_declaration()?)))
+            }
+            TokenType::Lbrace => {
+                self.next(); // consume the {
+                let key = self.type_declaration()?;
+                let token = self.peek_or_error("expected : or }")?;
+                match token.token_type {
+                    TokenType::Rbrace => {
+                        self.next();
+                        return Ok(Type::Set(Box::new(key)));
+                    }
+                    TokenType::Colon => {
+                        self.next(); // consume the :
+                    }
+                    _ => {
+                        self.error("expected : or }");
+                        return Err(());
+                    }
+                }
+
+                self.peek_or_error("expected value type")?;
+                let value = self.type_declaration()?;
+                if !self.check(TokenType::Rbrace) {
+                    self.error("expected closing }");
+                    return Err(());
+                }
+                self.next(); // consume the closing }
+                Ok(Type::Map(Box::new(key), Box::new(value)))
+            }
+            _ => {
+                self.error("expected type declaration");
+                Err(())
+            }
+        }
+    }
+
+    fn function(&mut self, decorators: Vec<Decorator<'a>>) -> Result<Declaration<'a>, ()> {
+        let name = self.peek_or_error("expected function name")?;
+        if !matches!(name.token_type, TokenType::Name | TokenType::Operator) {
+            self.error("expected function name");
+            self.next();
+            return Err(());
+        }
+        self.next();
+
+        self.consume(TokenType::Lparen, "expected (")?;
 
         let mut parameters = Vec::new();
-
-        while self.tokens[*current].token_type != TokenType::Rparen {
-            if self.is_at_end(current) {
-                errors.push(ParseError::new(
-                    "expected closing parenthesis".to_string(),
-                    self.lines[self.tokens[*current].line - 1].clone().collect(),
-                    self.tokens[*current].line,
-                    self.tokens[*current].column,
-                ));
-                return Err(());
-            }
-
-            let param_name =
-                self.consume(current, errors, TokenType::Name, "expected parameter name")?;
-            self.consume(current, errors, TokenType::Colon, "expected :")?;
-            let param_type = self.type_declaration(current, errors)?;
+        while !self.check(TokenType::Rparen) {
+            self.peek_or_error("expected closing parenthesis")?;
+            let param_name = self.consume(TokenType::Name, "expected parameter name")?;
+            self.consume(TokenType::Colon, "expected :")?;
+            let param_type = self.type_declaration()?;
             parameters.push((param_name, param_type));
-            *current += 1;
+            self.next();
         }
-        *current += 1; // consume the closing parenthesis
+        self.next(); // consume the closing parenthesis
 
-        let return_type = if self.is_joined(*current, "-", ">") {
-            *current += 2; // consume the ->
-            self.type_declaration(current, errors)?
+        let return_type = if self.is_joined("-", ">") {
+            self.next();
+            self.next(); // consume the ->
+            self.type_declaration()?
         } else {
             Type::Tuple(Vec::new())
         };
 
-        self.consume(current, errors, TokenType::Lbrace, "expected {")?;
+        self.consume(TokenType::Lbrace, "expected {")?;
 
         let mut body = Vec::new();
-
-        while self.tokens[*current].token_type != TokenType::Rbrace {
-            if self.is_at_end(current) {
-                errors.push(ParseError::new(
-                    "expected closing }".to_string(),
-                    self.lines[self.tokens[*current].line - 1].clone().collect(),
-                    self.tokens[*current].line,
-                    self.tokens[*current].column,
-                ));
-                return Err(());
-            }
-            let expr = self.expression(current, errors)?;
-            body.push(expr);
+        while !self.check(TokenType::Rbrace) {
+            self.peek_or_error("expected closing }")?;
+            body.push(self.expression()?);
         }
-        *current += 1; // consume the closing }
+        self.next(); // consume the closing }
 
         Ok(Declaration::Function {
             name,
@@ -808,22 +541,9 @@ impl<'a> Parser<'a> {
         })
     }
 
-    fn expression(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Expression<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected expression".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
-
-        match self.tokens[*current].token_type {
+    fn expression(&mut self) -> Result<Expression<'a>, ()> {
+        let token = self.peek_or_error("expected expression")?;
+        match token.token_type {
             TokenType::At
             | TokenType::Entity
             | TokenType::Fn
@@ -832,51 +552,39 @@ impl<'a> Parser<'a> {
             | TokenType::Extern
             | TokenType::Enum
             | TokenType::System
-            | TokenType::Macro => {
-                return Ok(Expression::Declaration(self.declaration(current, errors)?));
-            }
-            _ => self.assignment(current, errors),
+            | TokenType::Macro => Ok(Expression::Declaration(self.declaration()?)),
+            _ => self.assignment(),
         }
     }
 
-    fn assignment(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Expression<'_>, ()> {
-        let left = self.operators(current, errors)?;
+    fn assignment(&mut self) -> Result<Expression<'a>, ()> {
+        let left = self.operators()?;
 
-        if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Equal {
+        if !self.check(TokenType::Equal) {
             return Ok(left);
         }
+        self.next(); // consume the =
 
-        *current += 1; // consume the =
-
-        if let Expression::Variable(..)
-        | Expression::Dereference(..)
-        | Expression::FieldAccess { .. } = left
-        {
-            let right = self.assignment(current, errors)?;
-
-            return Ok(Expression::Assignment {
+        if matches!(
+            left,
+            Expression::Variable(..) | Expression::Dereference(..) | Expression::FieldAccess { .. }
+        ) {
+            let right = self.assignment()?;
+            Ok(Expression::Assignment {
                 lhs: Box::new(left),
                 rhs: Box::new(right),
-            });
+            })
         } else {
-            errors.push(ParseError::new(
-                "invalid assignment target".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
+            self.error("invalid assignment target");
+            Err(())
         }
     }
 
-    fn is_atom_start(&self, idx: usize) -> bool {
-        idx < self.tokens.len()
-            && matches!(
-                self.tokens[idx].token_type,
+    /// True if the token after the current one can start an atom.
+    fn next_is_atom_start(&self) -> bool {
+        self.peek_next().is_some_and(|t| {
+            matches!(
+                t.token_type,
                 TokenType::Integer
                     | TokenType::Float
                     | TokenType::String
@@ -887,78 +595,54 @@ impl<'a> Parser<'a> {
                     | TokenType::Name
                     | TokenType::Lparen
             )
+        })
     }
 
-    fn next_is_operator(&self, idx: usize) -> bool {
-        idx < self.tokens.len() && self.tokens[idx].token_type == TokenType::Operator
-    }
+    fn unary(&mut self) -> Result<Expression<'a>, ()> {
+        let Some(op) = self.peek().filter(|t| t.token_type == TokenType::Operator) else {
+            return self.call();
+        };
+        self.next();
+        let rhs = Box::new(self.unary()?);
 
-    fn unary(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Expression<'_>, ()> {
-        if !self.is_at_end(current) && self.tokens[*current].token_type == TokenType::Operator {
-            let op = &self.tokens[*current];
-            *current += 1;
-            let rhs = Box::new(self.unary(current, errors)?);
+        let suffix = if self.check(TokenType::Operator)
+            && self
+                .peek_next()
+                .is_some_and(|t| t.token_type == TokenType::Operator)
+        {
+            self.next()
+        } else {
+            None
+        };
 
-            let suffix = if !self.is_at_end(current)
-                && self.tokens[*current].token_type == TokenType::Operator
-                && self.next_is_operator(*current + 1)
-            {
-                let s = &self.tokens[*current];
-                *current += 1;
-                Some(s)
-            } else {
-                None
-            };
-
-            return Ok(if suffix.is_none() && op.value == "&" {
-                Expression::Reference(rhs)
-            } else if suffix.is_none() && op.value == "*" {
-                Expression::Dereference(rhs)
-            } else {
-                Expression::Prefix {
-                    operator: op,
-                    rhs,
-                    suffix,
-                }
-            });
-        }
-        self.call(current, errors)
-    }
-
-    fn operators(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Expression<'_>, ()> {
-        let mut left = self.unary(current, errors)?;
-
-        loop {
-            if self.is_at_end(current) || self.tokens[*current].token_type != TokenType::Operator {
-                break;
+        Ok(if suffix.is_none() && op.value == "&" {
+            Expression::Reference(rhs)
+        } else if suffix.is_none() && op.value == "*" {
+            Expression::Dereference(rhs)
+        } else {
+            Expression::Prefix {
+                operator: op,
+                rhs,
+                suffix,
             }
+        })
+    }
 
-            let op_pos = *current;
-            let op_token = &self.tokens[op_pos];
+    fn operators(&mut self) -> Result<Expression<'a>, ()> {
+        let mut left = self.unary()?;
 
-            *current += 1;
-            let rhs = self.unary(current, errors)?;
+        while let Some(op_token) = self.peek().filter(|t| t.token_type == TokenType::Operator) {
+            let op_pos = self.current;
+            self.next();
+            let rhs = self.unary()?;
 
-            let suffix = if !self.is_at_end(current)
-                && self.tokens[*current].token_type == TokenType::Operator
-                && !self.is_atom_start(*current + 1)
-            {
-                let s = &self.tokens[*current];
-                *current += 1;
-                Some(s)
+            let suffix = if self.check(TokenType::Operator) && !self.next_is_atom_start() {
+                self.next()
             } else {
                 None
             };
 
-            if !self.is_at_end(current) && self.tokens[*current].token_type == TokenType::Equal {
+            if self.check(TokenType::Equal) {
                 match &mut left {
                     Expression::Infix { suffix: s, .. } | Expression::Prefix { suffix: s, .. }
                         if s.is_none() =>
@@ -967,7 +651,7 @@ impl<'a> Parser<'a> {
                     }
                     _ => {}
                 }
-                *current = op_pos + 1;
+                self.current = op_pos + 1;
                 break;
             }
 
@@ -982,61 +666,28 @@ impl<'a> Parser<'a> {
         Ok(left)
     }
 
-    fn call(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Expression<'_>, ()> {
-        let mut expr = self.primary(current, errors)?;
+    fn call(&mut self) -> Result<Expression<'a>, ()> {
+        let mut expr = self.primary()?;
 
         loop {
-            if self.tokens[*current].token_type == TokenType::Lparen {
-                *current += 1; // consume the opening parenthesis
+            if self.check(TokenType::Lparen) {
+                self.next(); // consume the opening parenthesis
                 let mut arguments = Vec::new();
-                while self.tokens[*current].token_type != TokenType::Rparen {
-                    if self.is_at_end(current) {
-                        errors.push(ParseError::new(
-                            "expected closing parenthesis".to_string(),
-                            self.lines[self.tokens[*current].line - 1].clone().collect(),
-                            self.tokens[*current].line,
-                            self.tokens[*current].column,
-                        ));
-                        return Err(());
-                    }
-                    let argument = self.expression(current, errors)?;
-                    arguments.push(argument);
-                    if self.tokens[*current].token_type == TokenType::Comma {
-                        *current += 1; // consume the comma
-                    } else if self.tokens[*current].token_type != TokenType::Rparen {
-                        errors.push(ParseError::new(
-                            "expected , or )".to_string(),
-                            self.lines[self.tokens[*current].line - 1].clone().collect(),
-                            self.tokens[*current].line,
-                            self.tokens[*current].column,
-                        ));
-                        return Err(());
-                    }
+                while !self.check(TokenType::Rparen) {
+                    self.peek_or_error("expected closing parenthesis")?;
+                    arguments.push(self.expression()?);
+                    self.comma_or(TokenType::Rparen, "expected , or )")?;
                 }
-                *current += 1; // consume the closing parenthesis
-                expr = Expression::FunctionCall {
-                    name: match expr {
-                        Expression::Variable(name) => name,
-                        _ => {
-                            errors.push(ParseError::new(
-                                "expected function name".to_string(),
-                                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                                self.tokens[*current].line,
-                                self.tokens[*current].column,
-                            ));
-                            return Err(());
-                        }
-                    },
-                    arguments,
+                self.next(); // consume the closing parenthesis
+
+                let Expression::Variable(name) = expr else {
+                    self.error("expected function name");
+                    return Err(());
                 };
-            } else if self.tokens[*current].token_type == TokenType::Dot {
-                *current += 1; // consume the dot
-                let field =
-                    self.consume(current, errors, TokenType::Name, "expected field name")?;
+                expr = Expression::FunctionCall { name, arguments };
+            } else if self.check(TokenType::Dot) {
+                self.next(); // consume the dot
+                let field = self.consume(TokenType::Name, "expected field name")?;
                 expr = Expression::FieldAccess {
                     base: Box::new(expr),
                     field,
@@ -1049,22 +700,8 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn primary(
-        &self,
-        current: &mut usize,
-        errors: &mut Vec<ParseError>,
-    ) -> Result<Expression<'_>, ()> {
-        if self.is_at_end(current) {
-            errors.push(ParseError::new(
-                "expected expression".to_string(),
-                self.lines[self.tokens[*current].line - 1].clone().collect(),
-                self.tokens[*current].line,
-                self.tokens[*current].column,
-            ));
-            return Err(());
-        }
-
-        let token = &self.tokens[*current];
+    fn primary(&mut self) -> Result<Expression<'a>, ()> {
+        let token = self.peek_or_error("expected expression")?;
         match token.token_type {
             TokenType::Integer
             | TokenType::Float
@@ -1073,32 +710,22 @@ impl<'a> Parser<'a> {
             | TokenType::True
             | TokenType::False
             | TokenType::Null => {
-                *current += 1;
+                self.next();
                 Ok(Expression::Literal(token))
             }
             TokenType::Name => {
-                *current += 1;
+                self.next();
                 Ok(Expression::Variable(token))
             }
             TokenType::Lparen => {
-                *current += 1; // consume the opening parenthesis
-                let expr = self.expression(current, errors)?;
-                self.consume(
-                    current,
-                    errors,
-                    TokenType::Rparen,
-                    "expected closing parenthesis",
-                )?;
+                self.next(); // consume the opening parenthesis
+                let expr = self.expression()?;
+                self.consume(TokenType::Rparen, "expected closing parenthesis")?;
                 Ok(expr)
             }
             _ => {
-                errors.push(ParseError::new(
-                    "expected expression".to_string(),
-                    self.lines[self.tokens[*current].line - 1].clone().collect(),
-                    self.tokens[*current].line,
-                    self.tokens[*current].column,
-                ));
-                return Err(());
+                self.error("expected expression");
+                Err(())
             }
         }
     }

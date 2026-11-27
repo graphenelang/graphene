@@ -1,7 +1,7 @@
 #+TITLE: Code review notes
 #+TODO: TODO | DONE
 
-Review of the lexer/parser as of ~c3e5ed4~. Line numbers are as of ~47ea1af~.
+Review of the lexer/parser as of ~c3e5ed4~. Line numbers are as of the ~peek~ / ~next~ parser refactor.
 
 * Bugs
 ** TODO 1. The lexer test fails on ~main~
@@ -11,10 +11,10 @@ Review of the lexer/parser as of ~c3e5ed4~. Line numbers are as of ~47ea1af~.
 "variables in the condition are not mutated in the loop body". This is item 3.
 
 ** TODO 3. Any decorator breaks the declaration after it
-[[file:src/parser.rs::232][src/parser.rs:232]]. ~current_token~ is read once before ~while current_token.token_type == TokenType::At~, so the loop condition never changes. ~@inline fn f() { 1 }~ fails with "expected decorator name". The ~match~ after the loop also looks at the stale ~@~ token. On top of that, the ~TokenType::Entity~ branch ([[file:src/parser.rs::282][:282]]) throws away any decorators it collected.
+[[file:src/parser.rs::278][src/parser.rs:278]]. ~current_token~ is read once before ~while current_token.token_type == TokenType::At~, so the loop condition never changes. ~@inline fn f() { 1 }~ fails with "expected decorator name". The ~match~ after the loop also looks at the stale ~@~ token. On top of that, the ~TokenType::Entity~ branch ([[file:src/parser.rs::309][:309]]) throws away any decorators it collected.
 
 ** TODO 4. Function parameters don't parse
-[[file:src/parser.rs::771][src/parser.rs:771]]. After each parameter there's an unconditional ~*current += 1~. That skips the comma, but with one parameter it skips the ~)~. ~fn f(a: Int) { a }~ and ~fn f(a: Int, b: Int)~ both fail. It needs a proper comma-or-~)~ check like the other list parsers have.
+[[file:src/parser.rs::513][src/parser.rs:513]]. After each parameter there's an unconditional ~self.next()~. That skips the comma, but with one parameter it skips the ~)~. ~fn f(a: Int) { a }~ and ~fn f(a: Int, b: Int)~ both fail. It needs a proper comma-or-~)~ check like the other list parsers have.
 
 ** DONE 5. The lexer glued punctuation onto operators
 ~is_operator_char~ includes quotes, brackets, braces and commas, and ~operator()~ grabbed as many in a row as it could. So ~x="hi"~ lexed as the operator ~="~, ~-(1)~ lexed as ~-(~, ~]}~ became one token, ~///~ wasn't a comment, and ~Foo<Bar<T>>~ ended with a single ~>>~ token.
@@ -32,17 +32,20 @@ A side effect of item 5. ~=~ is its own token type (~Equal~), so ~a == b~ comes 
 [[file:src/lexer.rs::241][src/lexer.rs:241]]. The check is ~self.column < graphemes.len()~ where it should be ~self.column - 1 < graphemes.len()~. ~x = 1e5~ fails, but ~1e10~ works because there's a second digit.
 
 ** TODO 7. The generic-argument loop uses ~&&~ where it needs ~||~
-[[file:src/parser.rs::610][src/parser.rs:610]], [[file:src/parser.rs::628][:628]]. ~tok != Operator && value != ">"~ stops at any operator, so ~Foo<*T>~ ends immediately and the ~*~ gets consumed as if it were the ~>~. The intended condition is ~!(Operator && ">")~. Found by reading the code; not run.
+[[file:src/parser.rs::434][src/parser.rs:434]], [[file:src/parser.rs::441][:441]]. ~tok != Operator && value != ">"~ stops at any operator, so ~Foo<*T>~ ends immediately and the ~*~ gets consumed as if it were the ~>~. The intended condition is ~!(Operator && ">")~. Found by reading the code; not run.
 
 ** TODO 8. ~todo!("component")~ is reachable from user input
-[[file:src/parser.rs::359][src/parser.rs:359]]. ~entity Foo { x: Int }~ panics, which also kills the REPL. It should return a parse error until components are implemented.
+[[file:src/parser.rs::329][src/parser.rs:329]]. ~entity Foo { x: Int }~ panics, which also kills the REPL. It should return a parse error until components are implemented.
 
 ** TODO 9. The infix/assignment rewind looks broken
-[[file:src/parser.rs::960][src/parser.rs:960-971]]. When it sees ~=~, it rewinds ~current~ to ~op_pos + 1~, which points at the right-hand side, not the ~=~, so ~assignment()~ never sees the ~=~. The intent of this branch and of the ~suffix~ logic in ~operators()~ / ~unary()~ is unclear and needs a second look, especially now that operators are single-grapheme (see 5a).
+[[file:src/parser.rs::645][src/parser.rs:645-656]]. When it sees ~=~, it rewinds ~current~ to ~op_pos + 1~, which points at the right-hand side, not the ~=~, so ~assignment()~ never sees the ~=~. The intent of this branch and of the ~suffix~ logic in ~operators()~ / ~unary()~ is unclear and needs a second look, especially now that operators are single-grapheme (see 5a).
+
+** TODO 9a. Positional component values can't start with a name
+[[file:src/parser.rs::368][src/parser.rs:368]]. ~component_initializer()~ treats any ~Name~ token as the start of ~field: value~, so ~Pos(x, y)~ fails with "expected :". It needs to check for a following ~:~ (e.g. with ~peek_next()~) before deciding it's a field name. Found during the ~peek~ / ~next~ refactor; not fixed.
 
 * Smaller correctness issues
-** TODO 10. Wrong line numbers in some errors
-[[file:src/parser.rs::202][src/parser.rs:202]], [[file:src/parser.rs::323][:323]], [[file:src/parser.rs::389][:389]] and [[file:src/parser.rs::408][:408]] report ~line - 1~; everywhere else reports ~line~.
+** DONE 10. Wrong line numbers in some errors
+Four error sites reported ~line - 1~; everywhere else reported ~line~. Fixed by the ~peek~ / ~next~ refactor: every parser error now goes through one ~error()~ helper.
 
 ** TODO 11. Bad ~\u~ escapes become NUL silently
 Surrogates or values above ~0x10FFFF~ turn into ~\0~ instead of an error ([[file:src/lexer.rs::444][src/lexer.rs:444]], [[file:src/lexer.rs::588][:588]], ~unwrap_or('\0')~).
@@ -51,7 +54,7 @@ Surrogates or values above ~0x10FFFF~ turn into ~\0~ instead of an error ([[file
 ~character()~ reports the error ([[file:src/lexer.rs::363][src/lexer.rs:363]]) but doesn't return, so you also get "unterminated character literal".
 
 ** TODO 13. ~dyn~ missing inside function bodies
-~expression()~ ([[file:src/parser.rs::811][src/parser.rs:811]]) sends ~Const~ / ~Mut~ to ~declaration()~ but not ~Dyn~.
+~expression()~ ([[file:src/parser.rs::544][src/parser.rs:544]]) sends ~Const~ / ~Mut~ to ~declaration()~ but not ~Dyn~.
 
 ** TODO 14. Misleading message for ~extern~ / ~enum~ / ~system~ / ~macro~
 ~expression()~ sends them to ~declaration()~, which has no case for them and says "expected decorator or declaration".
@@ -60,32 +63,36 @@ Surrogates or values above ~0x10FFFF~ turn into ~\0~ instead of an error ([[file
 After an error the top-level loop skips one token and tries again, so one mistake turns into 3–4 "expected decorator or declaration" errors. Skipping ahead to the next declaration keyword or ~}~ would fix this.
 
 ** TODO 16. Caret is misaligned on line 10 and up
-The ~column + 3~ padding ([[file:src/lexer.rs::55][src/lexer.rs:55]], [[file:src/parser.rs::49][src/parser.rs:49]]) assumes a one-digit line number. Tabs and wide characters will misalign it too.
+The ~column + 3~ padding ([[file:src/lexer.rs::55][src/lexer.rs:55]], [[file:src/parser.rs::47][src/parser.rs:47]]) assumes a one-digit line number. Tabs and wide characters will misalign it too.
 
 ** TODO 17. No operator precedence
 ~1 + 2 * 3~ parses as ~(1 + 2) * 3~. That might be on purpose if operators are user-defined, but it's worth deciding.
 
 * Bad practice / maintainability
-** TODO 18. Lifetimes tied to the parser
-Methods return ~Program<'_>~ / ~Expression<'_>~, which ties the AST to ~&self~ (the ~Parser~) instead of ~'a~ (the tokens). You can't drop the parser while you still hold the AST. ~function()~ mixes ~Decorator<'a>~ in and ~Declaration<'_>~ out.
+** DONE 18. Lifetimes tied to the parser
+Methods returned ~Program<'_>~ / ~Expression<'_>~, which tied the AST to ~&self~ (the ~Parser~) instead of ~'a~ (the tokens). Fixed by the ~peek~ / ~next~ refactor: the cursor helpers return ~&'a Token~ and every grammar method returns ~...<'a>~.
 
 ** TODO 19. Inconsistent AST fields
 Some hold ~Token~, some ~&'a Token~. There are leftover placeholders like ~else_if: Vec<()>~, ~Expression::Temp~, and both ~Call~ and ~FunctionCall~. ~FunctionCall~ only takes a ~&Token~ name, so ~obj.method()~ and ~f()()~ can't be represented.
 
 ** TODO 20. Lots of repeated code
 - The escape-sequence handling is copied between ~character()~ and ~string()~, about 90 lines each.
-- The pragma and decorator argument parsing are identical.
-- The ~ParseError::new(..., self.lines[...].clone().collect(), ...)~ call is written out about 40 times. One ~self.error_at(current, msg)~ helper would cover them.
 - The line-splitting and error ~Display~ code exist in both the lexer and the parser.
 
-** TODO 21. Wasteful line storage in the parser
-It keeps ~Vec<Graphemes>~ and clones and collects one every time it reports an error. ~Vec<&'a str>~ would be simpler.
+Fixed by the ~peek~ / ~next~ refactor:
+- The pragma and decorator argument parsing are now one ~raw_arguments()~ helper.
+- The ~40 copies of ~ParseError::new(...)~ are now one ~error()~ helper.
+
+** DONE 21. Wasteful line storage in the parser
+It kept ~Vec<Graphemes>~ and cloned and collected one every time it reported an error. Now ~Vec<&'a str>~ (~peek~ / ~next~ refactor).
 
 ** TODO 22. Awkward cursor handling
-The ~current: &mut usize~ threaded through every parser call, the ~is_at_end(&self, &usize)~ signature, and the ~self.column - 1~ indexing throughout the lexer are a big part of why there are so many off-by-one bugs. A separate ~pos~ field, with ~column~ only used for reporting, would remove most of them.
+The ~self.column - 1~ indexing throughout the lexer is a big part of why there are so many off-by-one bugs there. A separate ~pos~ field, with ~column~ only used for reporting, would remove most of them.
+
+Parser half fixed by the ~peek~ / ~next~ refactor: ~current~ and ~errors~ are now fields, and tokens are read through ~peek()~, ~peek_next()~ and ~next()~, which return ~None~ at end of input and never move past EOF. This also fixed a panic: ~fn f(a: Int~ used to index past the end of the token list.
 
 ** TODO 23. Type niggles
-- ~&'a Vec<Token>~ would be better as ~&'a [Token]~.
+- +~&'a Vec<Token>~ would be better as ~&'a [Token]~.+ (done in the ~peek~ / ~next~ refactor)
 - ~ParseError~ has no ~Debug~, and neither error type implements ~std::error::Error~.
 - ~LexError~ has private fields while ~ParseError~'s are public.
 
@@ -99,8 +106,8 @@ It loops over the actual tokens and indexes into the expected list, so if the le
 - A readline error panics.
 - It calls ~.unwrap()~ on ~add_history_entry~.
 
-** TODO 26. Repo hygiene
-~.DS_Store~ is committed. Add it to ~.gitignore~ and run ~git rm --cached .DS_Store~.
+** DONE 26. Repo hygiene
+~.DS_Store~ was committed. It's now in ~.gitignore~ and untracked with ~git rm --cached~.
 
 ** TODO 27. Clippy warnings
-31 of them, mostly needless ~return~ statements and ~if let Err(_)~ where ~.is_err()~ would do. Easy cleanup once item 2 is fixed.
+There were 31, mostly needless ~return~ statements and ~if let Err(_)~ where ~.is_err()~ would do. The ~peek~ / ~next~ refactor cleared all but one: ~Program~ should have a ~Default~ impl. Item 2's hard error remains.
