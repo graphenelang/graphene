@@ -316,28 +316,18 @@ impl<'a> Lexer<'a> {
             .push(Token::new(token_type, name, self.line, token_col));
     }
 
+    /// Operators are always a single grapheme. Multi-grapheme operators
+    /// (`==`, `<<`, `->`, ...) are assembled by the parser from adjacent tokens.
     fn operator(&mut self, graphemes: &[&str]) {
         let token_col = self.column - 1;
-        let mut operator = graphemes[self.column - 2].to_string();
-        if graphemes.len() > self.column - 1 {
-            let mut c = graphemes[self.column - 1].chars().next().unwrap_or('\0');
+        let operator = graphemes[self.column - 2];
 
-            while is_operator_char(c) {
-                operator.push_str(graphemes[self.column - 1]);
-                self.column += 1;
-                if self.column - 1 >= graphemes.len() {
-                    break;
-                }
-                c = graphemes[self.column - 1].chars().next().unwrap_or('\0');
-            }
-        }
-
-        if operator == "//" {
+        if operator == "/" && graphemes.get(self.column - 1) == Some(&"/") {
             self.comment(graphemes);
             return;
         }
 
-        let token_type = match operator.as_str() {
+        let token_type = match operator {
             "=" => TokenType::Equal,
             ":" => TokenType::Colon,
             "," => TokenType::Comma,
@@ -346,8 +336,12 @@ impl<'a> Lexer<'a> {
             _ => TokenType::Operator,
         };
 
-        self.tokens
-            .push(Token::new(token_type, operator, self.line, token_col));
+        self.tokens.push(Token::new(
+            token_type,
+            operator.to_owned(),
+            self.line,
+            token_col,
+        ));
     }
 
     fn comment(&mut self, graphemes: &[&str]) {
@@ -685,7 +679,8 @@ const z = 1e10
             Token::new(TokenType::Char, "a".to_owned(), 8, 1),
             Token::new(TokenType::Char, "≈".to_owned(), 9, 1),
             Token::new(TokenType::Equal, "=".to_owned(), 10, 1),
-            Token::new(TokenType::Operator, "--".to_owned(), 11, 1),
+            Token::new(TokenType::Operator, "-".to_owned(), 11, 1),
+            Token::new(TokenType::Operator, "-".to_owned(), 11, 2),
             Token::new(TokenType::Lbrace, "{".to_owned(), 13, 1),
             Token::new(TokenType::Rbrace, "}".to_owned(), 13, 2),
             Token::new(TokenType::Lparen, "(".to_owned(), 14, 1),

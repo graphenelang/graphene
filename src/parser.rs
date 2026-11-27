@@ -73,6 +73,33 @@ impl<'a> Parser<'a> {
         self.tokens[*current].token_type == TokenType::EOF
     }
 
+    /// True if the tokens at `idx` and `idx + 1` are the single-grapheme
+    /// symbols `first` and `second` with nothing between them, e.g. `->` or `@@`.
+    /// Symbol tokens are always one grapheme wide, so touching means the second
+    /// starts on the same line one column after the first.
+    fn is_joined(&self, idx: usize, first: &str, second: &str) -> bool {
+        let (Some(a), Some(b)) = (self.tokens.get(idx), self.tokens.get(idx + 1)) else {
+            return false;
+        };
+        let is_symbol = |t: &Token| {
+            matches!(
+                t.token_type,
+                TokenType::Operator
+                    | TokenType::At
+                    | TokenType::Equal
+                    | TokenType::Colon
+                    | TokenType::Comma
+                    | TokenType::Dot
+            )
+        };
+        is_symbol(a)
+            && is_symbol(b)
+            && a.value == first
+            && b.value == second
+            && a.line == b.line
+            && b.column == a.column + 1
+    }
+
     fn consume(
         &self,
         current: &mut usize,
@@ -126,23 +153,19 @@ impl<'a> Parser<'a> {
     fn program(&self, current: &mut usize, errors: &mut Vec<ParseError>) -> Program<'_> {
         let mut program = Program::new();
         while !self.is_at_end(current) {
-            match self.tokens[*current] {
-                Token {
-                    token_type: TokenType::Operator,
-                    value: ref literal,
-                    ..
-                } => {
-                    if literal != "@@" {
-                        errors.push(ParseError::new(
-                            "expected pragma or declaration".to_string(),
-                            self.lines[self.tokens[*current].line - 1].clone().collect(),
-                            self.tokens[*current].line,
-                            self.tokens[*current].column,
-                        ));
-                        *current += 1;
-                        continue;
-                    }
+            match self.tokens[*current].token_type {
+                TokenType::Operator => {
+                    errors.push(ParseError::new(
+                        "expected pragma or declaration".to_string(),
+                        self.lines[self.tokens[*current].line - 1].clone().collect(),
+                        self.tokens[*current].line,
+                        self.tokens[*current].column,
+                    ));
                     *current += 1;
+                    continue;
+                }
+                TokenType::At if self.is_joined(*current, "@", "@") => {
+                    *current += 2; // consume "@@"
                     let pragma = self.pragma(current, errors);
                     if let Ok(pragma) = pragma {
                         program.pragmas.push(pragma);
@@ -749,10 +772,8 @@ impl<'a> Parser<'a> {
         }
         *current += 1; // consume the closing parenthesis
 
-        let return_type = if self.tokens[*current].token_type == TokenType::Operator
-            && self.tokens[*current].value == "->"
-        {
-            *current += 1; // consume the ->
+        let return_type = if self.is_joined(*current, "-", ">") {
+            *current += 2; // consume the ->
             self.type_declaration(current, errors)?
         } else {
             Type::Tuple(Vec::new())
